@@ -42,8 +42,9 @@ function render() {
 function renderHeaderStats() {
   const total = state.books.length;
   const done = state.books.filter(b => b.status === "done").length;
-  document.getElementById("headerStats").textContent =
-    total ? `${total}冊 / 読了${done}冊` : "";
+  const stats = total ? `${total}冊 / 読了${done}冊 ` : "";
+  document.getElementById("headerStats").innerHTML =
+    `${stats}<span style="opacity:.55;font-size:.7rem">v${APP_VERSION}</span>`;
 }
 
 function renderTabs() {
@@ -125,7 +126,7 @@ function progressPercent(b) {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "1.3";
+const APP_VERSION = "1.4";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
