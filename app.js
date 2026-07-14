@@ -270,7 +270,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "1.8";
+const APP_VERSION = "1.9";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -416,7 +416,7 @@ function showScanToast(msg, warn) {
   t.classList.toggle("warn", !!warn);
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2400);
+  toastTimer = setTimeout(() => { t.hidden = true; }, warn ? 4500 : 2400);
 }
 
 async function onScanned(isbn) {
@@ -442,7 +442,9 @@ async function onScanned(isbn) {
   }
   showScanToast(`検索中… (${isbn})`);
   let info = await fetchBookInfo(isbn);
+  let notFound = false;
   if (!info) {
+    notFound = true;
     info = { isbn, title: `ISBN ${isbn}`, author: "", publisher: "", cover: "", totalPages: null };
   }
   if (state.books.some(b => b.isbn === isbn)) return; // 取得中の二重登録防止
@@ -461,7 +463,11 @@ async function onScanned(isbn) {
   });
   saveState();
   render();
-  showScanToast(`「${info.title}」を登録しました`);
+  if (notFound) {
+    showScanToast("情報が見つからずISBNのみで登録。詳細画面の「✎情報を編集」で書名を入力できます", true);
+  } else {
+    showScanToast(`「${info.title}」を登録しました`);
+  }
 }
 
 /* ============================================================
@@ -714,6 +720,18 @@ function renderDetail() {
         <p>${escapeHtml(b.publisher)}</p>
         <p>ISBN: ${b.isbn}</p>
         ${b.totalPages ? `<p>全${b.totalPages}ページ</p>` : ""}
+        <button class="edit-info-btn" id="editInfoBtn">✎ 情報を編集</button>
+      </div>
+    </div>
+
+    <div class="edit-info-form" id="editInfoForm" hidden>
+      <input class="edit-field" id="dEditTitle" placeholder="書名（必須）" value="${escapeHtml(b.title)}">
+      <input class="edit-field" id="dEditAuthor" placeholder="著者" value="${escapeHtml(b.author)}">
+      <input class="edit-field" id="dEditPublisher" placeholder="出版社" value="${escapeHtml(b.publisher)}">
+      <input class="edit-field" id="dEditPages" type="number" inputmode="numeric" placeholder="総ページ数" value="${b.totalPages || ""}">
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn secondary" id="dEditCancel">キャンセル</button>
+        <button class="btn primary" id="dEditSave">保存</button>
       </div>
     </div>
 
@@ -747,6 +765,27 @@ function renderDetail() {
       <button class="btn danger" id="deleteBookBtn">この本を削除</button>
     </div>
   `;
+
+  // 書誌情報の編集(書名が取得できなかった本の手直しにも使う)
+  body.querySelector("#editInfoBtn").onclick = () => {
+    const form = body.querySelector("#editInfoForm");
+    form.hidden = !form.hidden;
+  };
+  body.querySelector("#dEditCancel").onclick = () => {
+    body.querySelector("#editInfoForm").hidden = true;
+  };
+  body.querySelector("#dEditSave").onclick = () => {
+    const title = body.querySelector("#dEditTitle").value.trim();
+    if (!title) { alert("書名を入力してください。"); return; }
+    b.title = title;
+    b.author = body.querySelector("#dEditAuthor").value.trim();
+    b.publisher = body.querySelector("#dEditPublisher").value.trim();
+    const p = parseInt(body.querySelector("#dEditPages").value, 10);
+    b.totalPages = p > 0 ? p : null;
+    saveState();
+    renderDetail();
+    render();
+  };
 
   // 置き場所セレクト
   const sel = body.querySelector("#detailLocation");

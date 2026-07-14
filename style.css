@@ -288,10 +288,9 @@ body {
   color: #fff;
   font-size: .82rem;
   padding: 8px 14px;
-  border-radius: 999px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  border-radius: 14px;
+  text-align: center;
+  line-height: 1.5;
   z-index: 5;
 }
 .scan-toast.warn { background: rgba(192, 57, 43, .92); }
@@ -527,6 +526,19 @@ body {
   cursor: pointer;
 }
 .loc-act-btn:disabled { opacity: .25; }
+
+/* ---------- 書誌情報の編集 ---------- */
+.edit-info-btn {
+  margin-top: 8px;
+  border: 1px solid #d8d2c2;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: .78rem;
+  color: var(--green-dark);
+  cursor: pointer;
+}
+.edit-info-form { margin: 4px 0 14px; }
 
 /* ---------- iOSズーム対策 ----------
    iOS Safariはフォントが16px未満の入力欄にフォーカスすると
