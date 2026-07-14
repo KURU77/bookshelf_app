@@ -270,7 +270,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "1.6";
+const APP_VERSION = "1.7";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -834,10 +834,31 @@ function renderGenreList() {
   if (state.genres.length === 0) {
     ul.innerHTML = `<li style="color:var(--muted);font-size:.82rem">まだジャンルがありません</li>`;
   }
-  for (const g of state.genres) {
+  state.genres.forEach((g, i) => {
     const count = state.books.filter(b => b.genre === g).length;
     const li = document.createElement("li");
-    li.innerHTML = `<span>${escapeHtml(g)} <small style="color:var(--muted)">(${count}冊)</small></span>`;
+    li.innerHTML = `<span class="loc-name">${escapeHtml(g)} <small style="color:var(--muted)">(${count}冊)</small></span>`;
+    const actions = document.createElement("div");
+    actions.className = "loc-actions";
+
+    const up = makeActBtn("↑", i === 0);
+    up.onclick = () => { moveItem(state.genres, i, -1); saveState(); renderGenreList(); render(); };
+    const down = makeActBtn("↓", i === state.genres.length - 1);
+    down.onclick = () => { moveItem(state.genres, i, 1); saveState(); renderGenreList(); render(); };
+
+    const ren = makeActBtn("変更");
+    ren.onclick = () => {
+      const name = (prompt("新しいジャンル名を入力してください", g) || "").trim();
+      if (!name || name === g) return;
+      if (state.genres.includes(name)) { alert("同じ名前のジャンルがあります。"); return; }
+      state.genres[i] = name;
+      state.books.forEach(b => { if (b.genre === g) b.genre = name; });
+      if (currentGenre === g) currentGenre = name;
+      saveState();
+      renderGenreList();
+      render();
+    };
+
     const del = document.createElement("button");
     del.className = "loc-del";
     del.textContent = "削除";
@@ -853,9 +874,27 @@ function renderGenreList() {
       renderGenreList();
       render();
     };
-    li.appendChild(del);
+
+    actions.append(up, down, ren, del);
+    li.appendChild(actions);
     ul.appendChild(li);
-  }
+  });
+}
+
+/* 管理リスト用の小ボタン */
+function makeActBtn(label, disabled) {
+  const btn = document.createElement("button");
+  btn.className = "loc-act-btn";
+  btn.textContent = label;
+  btn.disabled = !!disabled;
+  return btn;
+}
+
+/* 配列のi番目をdir(-1/+1)方向へ移動 */
+function moveItem(arr, i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
 }
 
 /* ============================================================
@@ -875,10 +914,31 @@ function fillLocationSelect(sel, selected) {
 function renderLocList() {
   const ul = document.getElementById("locList");
   ul.innerHTML = "";
-  for (const l of state.locations) {
+  state.locations.forEach((l, i) => {
     const count = state.books.filter(b => b.location === l).length;
     const li = document.createElement("li");
-    li.innerHTML = `<span>${escapeHtml(l)} <small style="color:var(--muted)">(${count}冊)</small></span>`;
+    li.innerHTML = `<span class="loc-name">${escapeHtml(l)} <small style="color:var(--muted)">(${count}冊)</small></span>`;
+    const actions = document.createElement("div");
+    actions.className = "loc-actions";
+
+    const up = makeActBtn("↑", i === 0);
+    up.onclick = () => { moveItem(state.locations, i, -1); saveState(); renderLocList(); render(); };
+    const down = makeActBtn("↓", i === state.locations.length - 1);
+    down.onclick = () => { moveItem(state.locations, i, 1); saveState(); renderLocList(); render(); };
+
+    const ren = makeActBtn("変更");
+    ren.onclick = () => {
+      const name = (prompt("新しい名前を入力してください", l) || "").trim();
+      if (!name || name === l) return;
+      if (state.locations.includes(name)) { alert("同じ名前の置き場所があります。"); return; }
+      state.locations[i] = name;
+      state.books.forEach(b => { if (b.location === l) b.location = name; });
+      if (currentLocation === l) currentLocation = name;
+      saveState();
+      renderLocList();
+      render();
+    };
+
     const del = document.createElement("button");
     del.className = "loc-del";
     del.textContent = "削除";
@@ -898,9 +958,11 @@ function renderLocList() {
       renderLocList();
       render();
     };
-    li.appendChild(del);
+
+    actions.append(up, down, ren, del);
+    li.appendChild(actions);
     ul.appendChild(li);
-  }
+  });
 }
 
 /* ============================================================

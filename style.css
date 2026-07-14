@@ -503,3 +503,27 @@ body {
   cursor: pointer;
   font-size: .8rem;
 }
+.loc-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 8px;
+}
+.loc-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.loc-act-btn {
+  border: 1px solid #d8d2c2;
+  background: #fff;
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: .75rem;
+  color: var(--green-dark);
+  cursor: pointer;
+}
+.loc-act-btn:disabled { opacity: .25; }

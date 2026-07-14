@@ -2,7 +2,7 @@
    - アプリ本体(HTML/CSS/JS)をキャッシュしてオフラインでも一覧を見られるようにする
    - HTMLはネットワーク優先(更新をすぐ反映)、静的ファイルはキャッシュ優先 */
 
-const CACHE_NAME = "my-bookshelf-v6";
+const CACHE_NAME = "my-bookshelf-v7";
 const APP_SHELL = [
   "./",
   "./index.html",
