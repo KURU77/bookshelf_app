@@ -20,10 +20,17 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const data = JSON.parse(raw);
-      if (Array.isArray(data.books) && Array.isArray(data.locations)) return data;
+      if (Array.isArray(data.books) && Array.isArray(data.locations)) {
+        // 旧データ移行: 並び順を手動管理に切り替え(初回だけ登録日時順に整列)
+        if (!data.manualOrder) {
+          data.books.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+          data.manualOrder = true;
+        }
+        return data;
+      }
     }
   } catch (e) { /* 壊れたデータは初期化 */ }
-  return { books: [], locations: [...DEFAULT_LOCATIONS] };
+  return { books: [], locations: [...DEFAULT_LOCATIONS], manualOrder: true };
 }
 
 function saveState() {
@@ -86,19 +93,19 @@ function renderGrid() {
   const grid = document.getElementById("bookGrid");
   const empty = document.getElementById("emptyState");
   grid.innerHTML = "";
-  const books = visibleBooks()
-    .slice()
-    .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  // 並び順は books 配列の順そのまま(長押しドラッグで並べ替え可能)
+  const books = visibleBooks();
 
   empty.hidden = books.length > 0;
 
   for (const b of books) {
     const card = document.createElement("div");
     card.className = "book-card";
+    card.dataset.isbn = b.isbn;
     const st = bookStatus(b);
 
     const coverHtml = b.cover
-      ? `<img class="book-cover" src="${escapeHtml(b.cover)}" alt="" loading="lazy"
+      ? `<img class="book-cover" src="${escapeHtml(b.cover)}" alt="" loading="lazy" draggable="false"
            onerror="this.outerHTML='<div class=&quot;book-cover placeholder&quot;>${escapeHtml(b.title)}</div>'">`
       : `<div class="book-cover placeholder">${escapeHtml(b.title)}</div>`;
 
@@ -112,7 +119,8 @@ function renderGrid() {
       ${progressHtml}
       <div class="book-title">${escapeHtml(b.title)}</div>
     `;
-    card.onclick = () => openDetail(b.isbn);
+    card.onclick = () => { if (suppressClick) return; openDetail(b.isbn); };
+    attachDragHandlers(card);
     grid.appendChild(card);
   }
 }
@@ -124,9 +132,126 @@ function progressPercent(b) {
 }
 
 /* ============================================================
+   並べ替え(表紙を長押し→浮き上がったらドラッグで移動)
+   ============================================================ */
+const LONG_PRESS_MS = 450;
+let dragCtx = null;        // 進行中の長押し/ドラッグの状態
+let suppressClick = false; // ドラッグ直後の誤タップ(詳細が開く)防止
+
+function attachDragHandlers(card) {
+  card.addEventListener("pointerdown", (e) => {
+    if (dragCtx) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    dragCtx = {
+      card,
+      pointerId: e.pointerId,
+      startX: e.clientX, startY: e.clientY,
+      lastX: e.clientX, lastY: e.clientY,
+      dragging: false
+    };
+    card.classList.add("pressing");
+    dragCtx.timer = setTimeout(liftCard, LONG_PRESS_MS);
+  });
+}
+
+function liftCard() {
+  if (!dragCtx || dragCtx.dragging) return;
+  const { card } = dragCtx;
+  const rect = card.getBoundingClientRect();
+  const clone = card.cloneNode(true);
+  clone.classList.remove("pressing");
+  clone.classList.add("drag-clone");
+  clone.style.width = rect.width + "px";
+  clone.style.left = rect.left + "px";
+  clone.style.top = rect.top + "px";
+  document.body.appendChild(clone);
+  Object.assign(dragCtx, {
+    clone,
+    dragging: true,
+    offsetX: dragCtx.lastX - rect.left,
+    offsetY: dragCtx.lastY - rect.top
+  });
+  card.classList.remove("pressing");
+  card.classList.add("drag-origin");
+  try { card.setPointerCapture(dragCtx.pointerId); } catch (e) {}
+  // ドラッグ中は画面スクロールを止める
+  document.addEventListener("touchmove", blockTouchScroll, { passive: false });
+  navigator.vibrate && navigator.vibrate(40);
+}
+
+function blockTouchScroll(e) { e.preventDefault(); }
+
+function cancelPress() {
+  if (!dragCtx) return;
+  clearTimeout(dragCtx.timer);
+  dragCtx.card.classList.remove("pressing");
+  dragCtx = null;
+}
+
+window.addEventListener("pointermove", (e) => {
+  if (!dragCtx || e.pointerId !== dragCtx.pointerId) return;
+  dragCtx.lastX = e.clientX;
+  dragCtx.lastY = e.clientY;
+
+  if (!dragCtx.dragging) {
+    // 長押し前に大きく動いたらスクロール操作とみなしてキャンセル
+    if (Math.hypot(e.clientX - dragCtx.startX, e.clientY - dragCtx.startY) > 12) cancelPress();
+    return;
+  }
+
+  const { clone, card } = dragCtx;
+  clone.style.left = (e.clientX - dragCtx.offsetX) + "px";
+  clone.style.top = (e.clientY - dragCtx.offsetY) + "px";
+
+  // 指の下にある別のカードの位置へ入れ替え(クローンはpointer-events:none)
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const target = under && under.closest(".book-card");
+  if (target && target !== card && target.parentElement === card.parentElement) {
+    const grid = card.parentElement;
+    const cards = [...grid.children];
+    if (cards.indexOf(card) < cards.indexOf(target)) {
+      grid.insertBefore(card, target.nextSibling);
+    } else {
+      grid.insertBefore(card, target);
+    }
+  }
+});
+
+function endDrag(e) {
+  if (!dragCtx) return;
+  if (e && e.pointerId !== undefined && e.pointerId !== dragCtx.pointerId) return;
+  const wasDragging = dragCtx.dragging;
+  clearTimeout(dragCtx.timer);
+  dragCtx.card.classList.remove("pressing", "drag-origin");
+  if (dragCtx.clone) dragCtx.clone.remove();
+  document.removeEventListener("touchmove", blockTouchScroll);
+  dragCtx = null;
+  if (wasDragging) {
+    commitGridOrder();
+    suppressClick = true;
+    setTimeout(() => { suppressClick = false; }, 350);
+  }
+}
+window.addEventListener("pointerup", endDrag);
+window.addEventListener("pointercancel", endDrag);
+
+/* グリッドの新しい並びを books 配列に反映する。
+   絞り込み表示中でも、表示中の本が元々占めていた位置だけを入れ替える */
+function commitGridOrder() {
+  const newOrder = [...document.getElementById("bookGrid").children]
+    .map(c => c.dataset.isbn);
+  const visibleSet = new Set(newOrder);
+  const slots = [];
+  state.books.forEach((b, i) => { if (visibleSet.has(b.isbn)) slots.push(i); });
+  const byIsbn = new Map(state.books.map(b => [b.isbn, b]));
+  newOrder.forEach((isbn, k) => { state.books[slots[k]] = byIsbn.get(isbn); });
+  saveState();
+}
+
+/* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "1.4";
+const APP_VERSION = "1.5";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -395,7 +520,7 @@ async function lookupAndConfirm(isbn) {
 function addPendingBook() {
   if (!pendingBook) return;
   const loc = document.getElementById("confirmLocation").value;
-  state.books.push({
+  state.books.unshift({
     isbn: pendingBook.isbn,
     title: pendingBook.title,
     author: pendingBook.author,
@@ -642,6 +767,9 @@ document.querySelectorAll(".filter-btn").forEach(btn => {
     render();
   };
 });
+
+// 長押し時にOSのメニュー(画像保存・右クリック)が出ないようにする
+document.getElementById("bookGrid").addEventListener("contextmenu", e => e.preventDefault());
 
 // モーダルの閉じるボタン・背景クリック
 document.querySelectorAll("[data-close]").forEach(btn => {

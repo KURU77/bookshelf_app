@@ -97,6 +97,21 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none; /* iOSの長押しメニューを抑止 */
+  transition: transform .25s;
+}
+.book-card.pressing { transform: scale(.93); }
+.book-card.drag-origin { opacity: .3; }
+.drag-clone {
+  position: fixed;
+  z-index: 200;
+  margin: 0;
+  pointer-events: none;
+  transform: scale(1.08) rotate(2deg);
+  filter: drop-shadow(0 14px 22px rgba(0,0,0,.35));
+  transition: none;
 }
 .book-cover {
   width: 100%;
