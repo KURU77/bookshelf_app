@@ -125,33 +125,38 @@ function progressPercent(b) {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
+const APP_VERSION = "1.3";
 let mediaStream = null;
-let scanLoopId = null;
-let zxingReader = null;
+let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
+let scanTimerId = null;  // setTimeout用(ZXing検出)
 let scanning = false;
+
+function setScanHint(text) {
+  document.getElementById("scanHint").innerHTML =
+    `${text} <small style="opacity:.5">v${APP_VERSION}</small>`;
+}
 
 async function openScanner() {
   showModal("scanModal");
-  document.getElementById("scanHint").textContent =
-    "本の裏表紙の 978 で始まるバーコードを枠に合わせてください";
+  setScanHint("本の裏表紙の 978 で始まるバーコードを枠に合わせてください");
   scanning = true;
   const video = document.getElementById("scanVideo");
-  const constraints = {
-    video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
-    audio: false
-  };
   try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    video.srcObject = mediaStream;
+    await video.play();
+
     if ("BarcodeDetector" in window) {
       const formats = await window.BarcodeDetector.getSupportedFormats();
       if (formats.includes("ean_13")) {
-        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = mediaStream;
-        await video.play();
         startNativeDetector(video);
         return;
       }
     }
-    await startZxing(video, constraints);
+    startZxingLoop(video);
   } catch (err) {
     document.getElementById("scanHint").innerHTML =
       "カメラを起動できませんでした。下の「手入力」をご利用ください。<br>" +
@@ -174,27 +179,56 @@ function startNativeDetector(video) {
   scanLoopId = requestAnimationFrame(tick);
 }
 
-/* ZXingでの読み取り。
-   注意: ストリームの接続と再生はZXingに任せること。
-   自前で video.play() した後に decodeFromVideoElementContinuously を呼ぶと、
-   ZXing内部が再生開始イベントを待ち続けて読み取りが始まらない
-   (iPhone Safariで発症。ChromeはネイティブBarcodeDetectorを使うため無症状) */
-async function startZxing(video, constraints) {
-  if (!window.ZXing) {
-    document.getElementById("scanHint").textContent =
-      "読み取りライブラリを読み込めませんでした。手入力をご利用ください。";
-    return;
-  }
+/* ZXingでの読み取り(iPhone Safariなど BarcodeDetector 非対応ブラウザ用)。
+   ZXingのストリーム管理は環境依存の不具合が多いため使わず、
+   カメラのフレームを自前でcanvasに切り出して直接デコードする */
+function createZxingDecoder() {
+  const reader = new ZXing.MultiFormatReader();
   const hints = new Map();
   hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.EAN_13]);
   hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-  zxingReader = new ZXing.BrowserMultiFormatReader(hints, 200);
-  mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-  await zxingReader.decodeFromStream(mediaStream, video, (result) => {
-    if (result && scanning && isIsbnCode(result.getText())) {
-      onScanned(result.getText());
+  reader.setHints(hints);
+  return (canvas) => {
+    try {
+      const source = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+      const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(source));
+      return reader.decodeWithState(bitmap).getText();
+    } catch (e) {
+      return null; // NotFoundException = このフレームでは見つからず(正常)
     }
-  });
+  };
+}
+
+function startZxingLoop(video) {
+  if (!window.ZXing) {
+    setScanHint("読み取りライブラリを読み込めませんでした。手入力をご利用ください。");
+    return;
+  }
+  const decodeCanvas = createZxingDecoder();
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  let attempts = 0;
+
+  const tick = () => {
+    if (!scanning) return;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (vw && vh) {
+      // 画面の照準枠に相当する中央帯だけを切り出してデコード(高速・高精度)
+      const cw = Math.round(vw * 0.8);
+      const ch = Math.round(vh * 0.45);
+      canvas.width = cw;
+      canvas.height = ch;
+      ctx.drawImage(video, (vw - cw) / 2, (vh - ch) / 2, cw, ch, 0, 0, cw, ch);
+      const text = decodeCanvas(canvas);
+      attempts++;
+      if (text && isIsbnCode(text)) { onScanned(text); return; }
+      if (attempts % 6 === 0) {
+        setScanHint(`スキャン中… バーコードを枠に合わせてください (${attempts})`);
+      }
+    }
+    scanTimerId = setTimeout(tick, 150);
+  };
+  tick();
 }
 
 /* 書籍のISBNバーコード(978/979始まり)だけを受け付ける。
@@ -207,7 +241,8 @@ function stopScanner() {
   scanning = false;
   if (scanLoopId) cancelAnimationFrame(scanLoopId);
   scanLoopId = null;
-  if (zxingReader) { try { zxingReader.reset(); } catch (e) {} zxingReader = null; }
+  if (scanTimerId) clearTimeout(scanTimerId);
+  scanTimerId = null;
   if (mediaStream) {
     mediaStream.getTracks().forEach(t => t.stop());
     mediaStream = null;
