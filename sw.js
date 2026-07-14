@@ -2,7 +2,7 @@
    - アプリ本体(HTML/CSS/JS)をキャッシュしてオフラインでも一覧を見られるようにする
    - HTMLはネットワーク優先(更新をすぐ反映)、静的ファイルはキャッシュ優先 */
 
-const CACHE_NAME = "my-bookshelf-v1";
+const CACHE_NAME = "my-bookshelf-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -39,8 +39,8 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // ページ本体はネットワーク優先(更新の反映を優先)、失敗時にキャッシュ
-  if (req.mode === "navigate") {
+  // ページ本体とJS/CSSはネットワーク優先(修正の反映を優先)、失敗時にキャッシュ
+  if (req.mode === "navigate" || req.destination === "script" || req.destination === "style") {
     e.respondWith(
       fetch(req)
         .then((res) => {

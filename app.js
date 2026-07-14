@@ -136,22 +136,22 @@ async function openScanner() {
     "本の裏表紙の 978 で始まるバーコードを枠に合わせてください";
   scanning = true;
   const video = document.getElementById("scanVideo");
+  const constraints = {
+    video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+    audio: false
+  };
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1280 } },
-      audio: false
-    });
-    video.srcObject = mediaStream;
-    await video.play();
-
     if ("BarcodeDetector" in window) {
       const formats = await window.BarcodeDetector.getSupportedFormats();
       if (formats.includes("ean_13")) {
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = mediaStream;
+        await video.play();
         startNativeDetector(video);
         return;
       }
     }
-    startZxing(video);
+    await startZxing(video, constraints);
   } catch (err) {
     document.getElementById("scanHint").innerHTML =
       "カメラを起動できませんでした。下の「手入力」をご利用ください。<br>" +
@@ -174,7 +174,12 @@ function startNativeDetector(video) {
   scanLoopId = requestAnimationFrame(tick);
 }
 
-function startZxing(video) {
+/* ZXingでの読み取り。
+   注意: ストリームの接続と再生はZXingに任せること。
+   自前で video.play() した後に decodeFromVideoElementContinuously を呼ぶと、
+   ZXing内部が再生開始イベントを待ち続けて読み取りが始まらない
+   (iPhone Safariで発症。ChromeはネイティブBarcodeDetectorを使うため無症状) */
+async function startZxing(video, constraints) {
   if (!window.ZXing) {
     document.getElementById("scanHint").textContent =
       "読み取りライブラリを読み込めませんでした。手入力をご利用ください。";
@@ -182,8 +187,10 @@ function startZxing(video) {
   }
   const hints = new Map();
   hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.EAN_13]);
-  zxingReader = new ZXing.BrowserMultiFormatReader(hints, 300);
-  zxingReader.decodeFromVideoElementContinuously(video, (result) => {
+  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  zxingReader = new ZXing.BrowserMultiFormatReader(hints, 200);
+  mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+  await zxingReader.decodeFromStream(mediaStream, video, (result) => {
     if (result && scanning && isIsbnCode(result.getText())) {
       onScanned(result.getText());
     }
