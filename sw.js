@@ -2,7 +2,7 @@
    - アプリ本体(HTML/CSS/JS)をキャッシュしてオフラインでも一覧を見られるようにする
    - HTMLはネットワーク優先(更新をすぐ反映)、静的ファイルはキャッシュ優先 */
 
-const CACHE_NAME = "my-bookshelf-v5";
+const CACHE_NAME = "my-bookshelf-v6";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -34,8 +34,10 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
-  // 書誌検索API(openBD/Google Books)はキャッシュしない(常に最新を取得)
-  if (url.hostname.includes("api.openbd.jp") || url.hostname.includes("googleapis.com")) {
+  // 書誌検索API(openBD/Google Books/Open Library)はキャッシュしない(常に最新を取得)
+  if (url.hostname.includes("api.openbd.jp") ||
+      url.hostname.includes("googleapis.com") ||
+      url.hostname === "openlibrary.org") {
     return;
   }
 
