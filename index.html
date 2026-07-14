@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2b6150">
+<title>マイ本棚 — バーコード蔵書管理</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="マイ本棚">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <h1>📚 マイ本棚</h1>
+  <div class="header-stats" id="headerStats"></div>
+</header>
+
+<!-- 置き場所タブ -->
+<nav class="location-tabs" id="locationTabs"></nav>
+
+<!-- フィルタ -->
+<div class="filter-bar">
+  <button class="filter-btn active" data-filter="all">すべて</button>
+  <button class="filter-btn" data-filter="unread">未読</button>
+  <button class="filter-btn" data-filter="reading">読書中</button>
+  <button class="filter-btn" data-filter="done">読了</button>
+  <button class="loc-manage-btn" id="manageLocBtn" title="置き場所を編集">⚙ 置き場所</button>
+</div>
+
+<!-- 本の一覧（表紙グリッド） -->
+<main class="book-grid" id="bookGrid"></main>
+<div class="empty-state" id="emptyState" hidden>
+  <p>まだ本がありません。</p>
+  <p>「＋ スキャン」でバーコードを読み取って登録しましょう。</p>
+</div>
+
+<!-- スキャンボタン -->
+<button class="fab" id="scanFab">＋ スキャン</button>
+
+<!-- ===== スキャナーモーダル ===== -->
+<div class="modal" id="scanModal" hidden>
+  <div class="modal-box scan-box">
+    <div class="modal-head">
+      <h2>バーコードを読み取り</h2>
+      <button class="close-btn" data-close="scanModal">✕</button>
+    </div>
+    <div class="scan-viewport">
+      <video id="scanVideo" playsinline muted></video>
+      <div class="scan-frame"></div>
+    </div>
+    <p class="scan-hint" id="scanHint">本の裏表紙の <strong>978</strong> で始まるバーコードを枠に合わせてください</p>
+    <details class="manual-isbn">
+      <summary>カメラが使えない場合（ISBNを手入力）</summary>
+      <div class="manual-row">
+        <input type="text" id="manualIsbn" inputmode="numeric" placeholder="例: 9784101010014">
+        <button id="manualAddBtn">検索</button>
+      </div>
+    </details>
+  </div>
+</div>
+
+<!-- ===== 登録確認モーダル ===== -->
+<div class="modal" id="confirmModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>この本を登録しますか？</h2>
+      <button class="close-btn" data-close="confirmModal">✕</button>
+    </div>
+    <div class="confirm-body" id="confirmBody"></div>
+    <label class="field-label">置き場所
+      <select id="confirmLocation"></select>
+    </label>
+    <div class="btn-row">
+      <button class="btn secondary" data-close="confirmModal">やめる</button>
+      <button class="btn primary" id="confirmAddBtn">登録する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 本の詳細モーダル ===== -->
+<div class="modal" id="detailModal" hidden>
+  <div class="modal-box detail-box">
+    <div class="modal-head">
+      <h2>本の詳細</h2>
+      <button class="close-btn" data-close="detailModal">✕</button>
+    </div>
+    <div id="detailBody"></div>
+  </div>
+</div>
+
+<!-- ===== 置き場所管理モーダル ===== -->
+<div class="modal" id="locModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>置き場所の管理</h2>
+      <button class="close-btn" data-close="locModal">✕</button>
+    </div>
+    <ul class="loc-list" id="locList"></ul>
+    <div class="manual-row">
+      <input type="text" id="newLocName" placeholder="新しい置き場所（例: 会社）">
+      <button id="addLocBtn">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ZXing（バーコード読み取りライブラリ・BarcodeDetector非対応ブラウザ用） -->
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="app.js"></script>
+<script>
+// PWA: Service Worker登録（オフライン対応・ホーム画面アプリ化）
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
