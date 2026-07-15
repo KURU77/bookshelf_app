@@ -299,7 +299,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.1";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -312,7 +312,7 @@ function setScanHint(text) {
 
 async function openScanner() {
   showModal("scanModal");
-  setScanHint("本の裏表紙の 978 で始まるバーコードを枠に合わせてください");
+  setScanHint("本は978、雑誌は491で始まるバーコードを枠に合わせてください");
   scanning = true;
   scanCooldownUntil = 0;
   lastScannedIsbn = null;
@@ -350,7 +350,7 @@ function startNativeDetector(video) {
     try {
       const codes = await detector.detect(video);
       for (const c of codes) {
-        if (isIsbnCode(c.rawValue)) { onScanned(c.rawValue); break; }
+        if (isBookBarcode(c.rawValue)) { onScanned(c.rawValue); break; }
       }
     } catch (e) { /* フレーム未準備などは無視 */ }
     if (!scanning) return; // 通常モードで登録に進んだら終了(連続モードは継続)
@@ -401,7 +401,7 @@ function startZxingLoop(video) {
       ctx.drawImage(video, (vw - cw) / 2, (vh - ch) / 2, cw, ch, 0, 0, cw, ch);
       const text = decodeCanvas(canvas);
       attempts++;
-      if (text && isIsbnCode(text)) {
+      if (text && isBookBarcode(text)) {
         onScanned(text);
         if (!scanning) return; // 通常モードで登録に進んだら終了(連続モードは継続)
       }
@@ -414,10 +414,19 @@ function startZxingLoop(video) {
   tick();
 }
 
-/* 書籍のISBNバーコード(978/979始まり)だけを受け付ける。
-   日本の本の下段バーコード(192...)や他の商品コードは無視する */
-function isIsbnCode(text) {
-  return /^97[89]\d{10}$/.test(text);
+/* 書籍のISBN(978/979始まり)と国内雑誌の定期刊行物コード(491始まり)を
+   受け付ける。本の下段バーコード(192...)や他の商品コードは無視する */
+function isBookBarcode(text) {
+  return /^97[89]\d{10}$/.test(text) || /^491\d{10}$/.test(text);
+}
+
+/* 491始まり = 雑誌(定期刊行物コード) */
+function isMagazineCode(code) {
+  return /^491/.test(code);
+}
+
+function codeLabel(code) {
+  return isMagazineCode(code) ? "雑誌コード" : "ISBN";
 }
 
 function stopScanner() {
@@ -475,7 +484,7 @@ async function onScanned(isbn) {
   let notFound = false;
   if (!info) {
     notFound = true;
-    info = { isbn, title: `ISBN ${isbn}`, author: "", publisher: "", cover: "", totalPages: null };
+    info = { isbn, title: `${codeLabel(isbn)} ${isbn}`, author: "", publisher: "", cover: "", totalPages: null };
   }
   if (state.books.some(b => b.isbn === isbn)) return; // 取得中の二重登録防止
   state.books.unshift({
@@ -495,7 +504,9 @@ async function onScanned(isbn) {
   saveState();
   render();
   if (notFound) {
-    showScanToast("情報が見つからずISBNのみで登録。詳細画面の「✎情報を編集」で書名を入力できます", true);
+    showScanToast(isMagazineCode(isbn)
+      ? "雑誌を登録しました。詳細画面の「✎情報を編集」で誌名を入力できます"
+      : "情報が見つからずISBNのみで登録。詳細画面の「✎情報を編集」で書名を入力できます", true);
   } else {
     showScanToast(`「${info.title}」を${currentList === "wish" ? "検討中リスト" : "蔵書"}に登録しました`);
   }
@@ -600,6 +611,8 @@ async function fetchOpenLibrary(isbn) {
 /* openBD(日本の書籍) → Google Books → Open Library(洋書) の順に検索し、
    表紙・ページ数など足りない項目を後続のソースで補完する */
 async function fetchBookInfo(isbn) {
+  // 雑誌(491コード)は号ごとの書誌データベースが存在しないため手入力登録にする
+  if (isMagazineCode(isbn)) return null;
   const fetchers = [fetchOpenBd, fetchGoogleBooks, fetchOpenLibrary];
   const merged = { title: "", author: "", publisher: "", cover: "", totalPages: null };
   let found = false;
@@ -653,16 +666,21 @@ async function lookupAndConfirm(isbn) {
     : `<div class="no-cover">表紙なし</div>`;
 
   if (info.notFound) {
-    // 書誌データベースに無い本: 手入力フォームを表示
+    // 書誌データベースに無い本・雑誌: 手入力フォームを表示
+    const isMag = isMagazineCode(isbn);
+    const notice = isMag
+      ? "雑誌は号ごとの情報がデータベースにないため、<br>誌名と号数を入力してください。"
+      : "書誌情報が見つかりませんでした。<br>手入力で登録できます。";
+    const titlePh = isMag ? "誌名と号数（例: 週刊少年ジャンプ 2026年30号）" : "書名（必須）";
     body.innerHTML = `
       ${coverHtml}
       <div class="confirm-meta" style="flex:1">
-        <p style="color:var(--danger);margin-bottom:8px">書誌情報が見つかりませんでした。<br>手入力で登録できます。</p>
-        <input class="edit-field" id="editTitle" placeholder="書名（必須）">
+        <p style="color:${isMag ? "var(--accent)" : "var(--danger)"};margin-bottom:8px">${notice}</p>
+        <input class="edit-field" id="editTitle" placeholder="${titlePh}">
         <input class="edit-field" id="editAuthor" placeholder="著者">
         <input class="edit-field" id="editPublisher" placeholder="出版社">
         <input class="edit-field" id="editPages" type="number" inputmode="numeric" placeholder="総ページ数">
-        <p style="margin-top:6px">ISBN: ${isbn}</p>
+        <p style="margin-top:6px">${codeLabel(isbn)}: ${isbn}</p>
       </div>
     `;
   } else {
@@ -688,7 +706,7 @@ function addPendingBook() {
   // 手入力フォームがある場合(書誌情報が見つからなかった本)はその値を使う
   const titleInput = document.getElementById("editTitle");
   if (titleInput) {
-    title = titleInput.value.trim() || `ISBN ${pendingBook.isbn}`;
+    title = titleInput.value.trim() || `${codeLabel(pendingBook.isbn)} ${pendingBook.isbn}`;
     author = document.getElementById("editAuthor").value.trim();
     publisher = document.getElementById("editPublisher").value.trim();
     const p = parseInt(document.getElementById("editPages").value, 10);
@@ -766,7 +784,7 @@ function renderDetail() {
         <h3>${escapeHtml(b.title)}</h3>
         <p>${escapeHtml(b.author)}</p>
         <p>${escapeHtml(b.publisher)}</p>
-        <p>ISBN: ${b.isbn}</p>
+        <p>${codeLabel(b.isbn)}: ${b.isbn}</p>
         ${b.totalPages ? `<p>全${b.totalPages}ページ</p>` : ""}
         <button class="edit-info-btn" id="editInfoBtn">✎ 情報を編集</button>
       </div>
@@ -1114,10 +1132,11 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-/* ISBN10 → ISBN13 変換（手入力対応） */
+/* ISBN10 → ISBN13 変換（手入力対応）。雑誌の491コードもそのまま受け付ける */
 function normalizeIsbn(input) {
   const s = input.replace(/[-\s]/g, "");
   if (/^97[89]\d{10}$/.test(s)) return s;
+  if (/^491\d{10}$/.test(s)) return s;
   if (/^\d{9}[\dXx]$/.test(s)) {
     const core = "978" + s.slice(0, 9);
     let sum = 0;
@@ -1191,7 +1210,7 @@ document.getElementById("contMode").onchange = (e) => {
 document.getElementById("manualAddBtn").onclick = async () => {
   const raw = document.getElementById("manualIsbn").value;
   const isbn = normalizeIsbn(raw);
-  if (!isbn) { alert("ISBNの形式が正しくありません。\n(978から始まる13桁、または10桁)"); return; }
+  if (!isbn) { alert("コードの形式が正しくありません。\n(本: 978から始まる13桁または10桁 / 雑誌: 491から始まる13桁)"); return; }
   stopScanner();
   hideModal("scanModal");
   document.getElementById("manualIsbn").value = "";
