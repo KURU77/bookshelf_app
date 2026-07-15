@@ -20,6 +20,12 @@
   <div class="header-stats" id="headerStats"></div>
 </header>
 
+<!-- 蔵書 / 検討中リスト切り替え -->
+<div class="list-switch">
+  <button class="list-tab active" data-list="owned" id="listTabOwned">📚 蔵書</button>
+  <button class="list-tab" data-list="wish" id="listTabWish">🛒 検討中</button>
+</div>
+
 <!-- 置き場所タブ -->
 <nav class="location-tabs" id="locationTabs"></nav>
 
@@ -86,7 +92,12 @@
       <button class="close-btn" data-close="confirmModal">✕</button>
     </div>
     <div class="confirm-body" id="confirmBody"></div>
-    <label class="field-label">置き場所
+    <label class="field-label">登録先</label>
+    <div class="status-toggle" style="margin-top:-8px">
+      <button id="destOwned">📚 蔵書</button>
+      <button id="destWish">🛒 検討中</button>
+    </div>
+    <label class="field-label" id="confirmLocationLabel">置き場所
       <select id="confirmLocation"></select>
     </label>
     <label class="field-label">ジャンル

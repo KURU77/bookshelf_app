@@ -9,11 +9,13 @@ const STORAGE_KEY = "my-bookshelf-v1";
 const DEFAULT_LOCATIONS = ["一人暮らし先", "実家", "祖父母宅", "研究室"];
 
 let state = loadState();
+let currentList = "owned";     // "owned"(蔵書) / "wish"(検討中)
 let currentLocation = "all";   // "all" または置き場所名
 let currentFilter = "all";     // all / unread / reading / done
 let currentGenre = "all";      // "all" / "none"(未分類) / ジャンル名
 let searchQuery = "";          // フリーワード検索(書名・著者)
 let pendingBook = null;        // 登録確認中の本
+let pendingList = "owned";     // 登録確認中の登録先リスト
 let detailIsbn = null;         // 詳細表示中の本のISBN
 
 /* ---------- 保存・読込 ---------- */
@@ -29,6 +31,8 @@ function loadState() {
           data.manualOrder = true;
         }
         if (!Array.isArray(data.genres)) data.genres = [];
+        // 旧データ移行: リスト区分(蔵書/検討中)がない本は蔵書扱い
+        data.books.forEach(b => { if (!b.list) b.list = "owned"; });
         return data;
       }
     }
@@ -44,10 +48,26 @@ function saveState() {
    画面描画
    ============================================================ */
 function render() {
+  renderListSwitch();
   renderTabs();
   renderGenreFilter();
   renderGrid();
   renderHeaderStats();
+}
+
+function renderListSwitch() {
+  const owned = state.books.filter(b => (b.list || "owned") === "owned").length;
+  const wish = state.books.filter(b => b.list === "wish").length;
+  const tabO = document.getElementById("listTabOwned");
+  const tabW = document.getElementById("listTabWish");
+  tabO.innerHTML = `📚 蔵書<span class="count">${owned}</span>`;
+  tabW.innerHTML = `🛒 検討中<span class="count">${wish}</span>`;
+  tabO.classList.toggle("active", currentList === "owned");
+  tabW.classList.toggle("active", currentList === "wish");
+  // 検討中リストでは置き場所タブと読了フィルタを隠す(購入前の本のため)
+  const isWish = currentList === "wish";
+  document.getElementById("locationTabs").style.display = isWish ? "none" : "";
+  document.querySelectorAll(".filter-btn").forEach(x => { x.style.display = isWish ? "none" : ""; });
 }
 
 function renderGenreFilter() {
@@ -62,9 +82,9 @@ function renderGenreFilter() {
 }
 
 function renderHeaderStats() {
-  const total = state.books.length;
-  const done = state.books.filter(b => b.status === "done").length;
-  const stats = total ? `${total}冊 / 読了${done}冊 ` : "";
+  const owned = state.books.filter(b => (b.list || "owned") === "owned");
+  const done = owned.filter(b => b.status === "done").length;
+  const stats = owned.length ? `${owned.length}冊 / 読了${done}冊 ` : "";
   document.getElementById("headerStats").innerHTML =
     `${stats}<span style="opacity:.55;font-size:.7rem">v${APP_VERSION}</span>`;
 }
@@ -75,10 +95,11 @@ function renderTabs() {
   const tabs = [{ key: "all", label: "すべて" }]
     .concat(state.locations.map(l => ({ key: l, label: l })));
 
+  const ownedBooks = state.books.filter(b => (b.list || "owned") === "owned");
   for (const t of tabs) {
     const count = t.key === "all"
-      ? state.books.length
-      : state.books.filter(b => b.location === t.key).length;
+      ? ownedBooks.length
+      : ownedBooks.filter(b => b.location === t.key).length;
     const btn = document.createElement("button");
     btn.className = "loc-tab" + (currentLocation === t.key ? " active" : "");
     btn.innerHTML = `${escapeHtml(t.label)}<span class="count">${count}</span>`;
@@ -90,8 +111,11 @@ function renderTabs() {
 function visibleBooks() {
   const q = searchQuery.toLowerCase();
   return state.books.filter(b => {
-    if (currentLocation !== "all" && b.location !== currentLocation) return false;
-    if (currentFilter !== "all" && bookStatus(b) !== currentFilter) return false;
+    if ((b.list || "owned") !== currentList) return false;
+    if (currentList === "owned") {
+      if (currentLocation !== "all" && b.location !== currentLocation) return false;
+      if (currentFilter !== "all" && bookStatus(b) !== currentFilter) return false;
+    }
     if (currentGenre === "none") { if (b.genre) return false; }
     else if (currentGenre !== "all" && b.genre !== currentGenre) return false;
     if (q && !`${b.title} ${b.author}`.toLowerCase().includes(q)) return false;
@@ -116,6 +140,9 @@ function renderGrid() {
   const books = visibleBooks();
 
   empty.hidden = books.length > 0;
+  empty.innerHTML = currentList === "wish"
+    ? `<p>検討中の本はまだありません。</p><p>スキャン時に登録先を「🛒 検討中」にすると追加できます。</p>`
+    : `<p>まだ本がありません。</p><p>「＋ スキャン」でバーコードを読み取って登録しましょう。</p>`;
 
   for (const b of books) {
     const card = document.createElement("div");
@@ -132,9 +159,11 @@ function renderGrid() {
     const progressHtml = progress !== null
       ? `<div class="progress-mini"><div style="width:${progress}%"></div></div>` : "";
 
+    const badgeHtml = (b.list || "owned") === "owned"
+      ? `<span class="status-badge ${st}">${STATUS_LABEL[st]}</span>` : "";
     card.innerHTML = `
       ${coverHtml}
-      <span class="status-badge ${st}">${STATUS_LABEL[st]}</span>
+      ${badgeHtml}
       ${progressHtml}
       <div class="book-title">${escapeHtml(b.title)}</div>
     `;
@@ -270,7 +299,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "1.9";
+const APP_VERSION = "2.0";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -289,7 +318,7 @@ async function openScanner() {
   lastScannedIsbn = null;
   const contSel = document.getElementById("contLocation");
   fillLocationSelect(contSel, contSel.value || undefined);
-  contSel.hidden = !document.getElementById("contMode").checked;
+  contSel.hidden = !document.getElementById("contMode").checked || currentList === "wish";
   const video = document.getElementById("scanVideo");
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -436,8 +465,9 @@ async function onScanned(isbn) {
   scanCooldownUntil = now + 3000;
   navigator.vibrate && navigator.vibrate(80);
 
-  if (state.books.some(b => b.isbn === isbn)) {
-    showScanToast("すでに登録されている本です", true);
+  const dup = state.books.find(b => b.isbn === isbn);
+  if (dup) {
+    showScanToast(dup.list === "wish" ? "検討中リストに登録済みの本です" : "すでに蔵書に登録されている本です", true);
     return;
   }
   showScanToast(`検索中… (${isbn})`);
@@ -455,7 +485,8 @@ async function onScanned(isbn) {
     publisher: info.publisher,
     cover: info.cover,
     totalPages: info.totalPages,
-    location: document.getElementById("contLocation").value,
+    list: currentList, // 今見ているリスト(蔵書/検討中)に登録
+    location: currentList === "wish" ? "" : document.getElementById("contLocation").value,
     genre: "",
     status: "unread",
     logs: [],
@@ -466,7 +497,7 @@ async function onScanned(isbn) {
   if (notFound) {
     showScanToast("情報が見つからずISBNのみで登録。詳細画面の「✎情報を編集」で書名を入力できます", true);
   } else {
-    showScanToast(`「${info.title}」を登録しました`);
+    showScanToast(`「${info.title}」を${currentList === "wish" ? "検討中リスト" : "蔵書"}に登録しました`);
   }
 }
 
@@ -595,8 +626,11 @@ async function fetchBookInfo(isbn) {
 }
 
 async function lookupAndConfirm(isbn) {
-  if (state.books.some(b => b.isbn === isbn)) {
-    alert("この本はすでに登録されています。");
+  const existing = state.books.find(b => b.isbn === isbn);
+  if (existing) {
+    alert(existing.list === "wish"
+      ? "この本は検討中リストに登録済みです。\n詳細画面から蔵書に移せます。"
+      : "この本はすでに蔵書に登録されています。");
     openDetail(isbn);
     return;
   }
@@ -605,6 +639,7 @@ async function lookupAndConfirm(isbn) {
   body.innerHTML = `<p style="padding:20px 0;color:var(--muted)">検索中… (ISBN: ${isbn})</p>`;
   fillLocationSelect(document.getElementById("confirmLocation"));
   fillGenreSelect(document.getElementById("confirmGenre"), "");
+  setPendingList(currentList); // 今見ているリストを登録先の初期値に
   showModal("confirmModal");
 
   let info = await fetchBookInfo(isbn);
@@ -667,7 +702,8 @@ function addPendingBook() {
     publisher,
     cover: pendingBook.cover,
     totalPages,
-    location: loc,
+    list: pendingList,
+    location: pendingList === "wish" ? "" : loc,
     genre: genreVal === "__new" ? "" : genreVal,
     status: "unread",
     logs: [],
@@ -677,6 +713,15 @@ function addPendingBook() {
   saveState();
   hideModal("confirmModal");
   render();
+}
+
+/* 登録確認画面の登録先(蔵書/検討中)切り替え */
+function setPendingList(list) {
+  pendingList = list;
+  document.getElementById("destOwned").classList.toggle("active", list === "owned");
+  document.getElementById("destWish").classList.toggle("active", list === "wish");
+  // 検討中リストには置き場所が不要
+  document.getElementById("confirmLocationLabel").style.display = list === "wish" ? "none" : "";
 }
 
 /* ============================================================
@@ -711,10 +756,13 @@ function renderDetail() {
           </li>`).join("") +
       `</ul>`;
 
-  body.innerHTML = `
+  const isWish = b.list === "wish";
+
+  const commonTop = `
     <div class="detail-top">
       ${coverHtml}
       <div class="detail-meta">
+        ${isWish ? `<p style="color:var(--accent);font-weight:bold">🛒 検討中の本</p>` : ""}
         <h3>${escapeHtml(b.title)}</h3>
         <p>${escapeHtml(b.author)}</p>
         <p>${escapeHtml(b.publisher)}</p>
@@ -734,37 +782,61 @@ function renderDetail() {
         <button class="btn primary" id="dEditSave">保存</button>
       </div>
     </div>
-
-    <div class="status-toggle">
-      <button id="stUnread" class="${b.status !== "done" ? "active" : ""}">未読了</button>
-      <button id="stDone" class="${b.status === "done" ? "active" : ""}">読了 ✓</button>
-    </div>
-
-    ${progress !== null ? `
-      <div class="progress-block">
-        <div class="progress-bar"><div style="width:${progress}%"></div></div>
-        <span class="progress-text">進捗 ${progress}%（${Math.max(...b.logs.map(l => l.page))} / ${b.totalPages}ページ）</span>
-      </div>` : ""}
-
-    <label class="field-label">置き場所
-      <select id="detailLocation"></select>
-    </label>
-    <label class="field-label">ジャンル
-      <select id="detailGenre"></select>
-    </label>
-
-    <div class="section-title">📖 読書の記録</div>
-    <div class="log-form">
-      <input type="number" id="logPage" min="1" placeholder="ページ数">
-      <input type="date" id="logDate" value="${today}">
-      <button id="logAddBtn">記録</button>
-    </div>
-    ${logsHtml}
-
-    <div class="btn-row" style="margin-top:20px">
-      <button class="btn danger" id="deleteBookBtn">この本を削除</button>
-    </div>
   `;
+
+  if (isWish) {
+    // 検討中の本: 読書記録の代わりに「蔵書に移す」ブロックを表示
+    body.innerHTML = `
+      ${commonTop}
+      <label class="field-label">ジャンル
+        <select id="detailGenre"></select>
+      </label>
+
+      <div class="section-title">📚 購入したら蔵書へ</div>
+      <label class="field-label">置き場所を選んでください
+        <select id="moveLocation"></select>
+      </label>
+      <button class="btn primary" id="moveToOwnedBtn" style="width:100%">📚 蔵書に移す</button>
+
+      <div class="btn-row" style="margin-top:20px">
+        <button class="btn danger" id="deleteBookBtn">この本を削除</button>
+      </div>
+    `;
+  } else {
+    body.innerHTML = `
+      ${commonTop}
+      <div class="status-toggle">
+        <button id="stUnread" class="${b.status !== "done" ? "active" : ""}">未読了</button>
+        <button id="stDone" class="${b.status === "done" ? "active" : ""}">読了 ✓</button>
+      </div>
+
+      ${progress !== null ? `
+        <div class="progress-block">
+          <div class="progress-bar"><div style="width:${progress}%"></div></div>
+          <span class="progress-text">進捗 ${progress}%（${Math.max(...b.logs.map(l => l.page))} / ${b.totalPages}ページ）</span>
+        </div>` : ""}
+
+      <label class="field-label">置き場所
+        <select id="detailLocation"></select>
+      </label>
+      <label class="field-label">ジャンル
+        <select id="detailGenre"></select>
+      </label>
+
+      <div class="section-title">📖 読書の記録</div>
+      <div class="log-form">
+        <input type="number" id="logPage" min="1" placeholder="ページ数">
+        <input type="date" id="logDate" value="${today}">
+        <button id="logAddBtn">記録</button>
+      </div>
+      ${logsHtml}
+
+      <div class="btn-row" style="margin-top:20px">
+        <button class="btn secondary" id="moveToWishBtn">🛒 検討中へ移す</button>
+        <button class="btn danger" id="deleteBookBtn">この本を削除</button>
+      </div>
+    `;
+  }
 
   // 書誌情報の編集(書名が取得できなかった本の手直しにも使う)
   body.querySelector("#editInfoBtn").onclick = () => {
@@ -787,12 +859,7 @@ function renderDetail() {
     render();
   };
 
-  // 置き場所セレクト
-  const sel = body.querySelector("#detailLocation");
-  fillLocationSelect(sel, b.location);
-  sel.onchange = () => { b.location = sel.value; saveState(); render(); };
-
-  // ジャンルセレクト
+  // ジャンルセレクト(共通)
   const gsel = body.querySelector("#detailGenre");
   fillGenreSelect(gsel, b.genre || "");
   gsel.onchange = () => {
@@ -802,36 +869,64 @@ function renderDetail() {
     render();
   };
 
-  // 読了トグル
-  body.querySelector("#stUnread").onclick = () => { b.status = "unread"; saveState(); renderDetail(); render(); };
-  body.querySelector("#stDone").onclick = () => { b.status = "done"; saveState(); renderDetail(); render(); };
-
-  // ログ追加
-  body.querySelector("#logAddBtn").onclick = () => {
-    const page = parseInt(body.querySelector("#logPage").value, 10);
-    const date = body.querySelector("#logDate").value;
-    if (!page || page < 1) { alert("ページ数を入力してください。"); return; }
-    if (!date) { alert("日付を選んでください。"); return; }
-    b.logs = b.logs || [];
-    b.logs.push({ page, date });
-    // 最終ページまで読んだら読了を提案
-    if (b.totalPages && page >= b.totalPages && b.status !== "done") {
-      if (confirm("最後のページまで読みました。読了にしますか？")) b.status = "done";
-    }
-    saveState();
-    renderDetail();
-    render();
-  };
-
-  // ログ削除
-  body.querySelectorAll(".log-del").forEach(btn => {
-    btn.onclick = () => {
-      b.logs.splice(parseInt(btn.dataset.logindex, 10), 1);
+  if (isWish) {
+    // 検討中 → 蔵書へ移動(購入時)
+    const msel = body.querySelector("#moveLocation");
+    fillLocationSelect(msel);
+    body.querySelector("#moveToOwnedBtn").onclick = () => {
+      b.list = "owned";
+      b.location = msel.value;
       saveState();
       renderDetail();
       render();
     };
-  });
+  } else {
+    // 置き場所セレクト
+    const sel = body.querySelector("#detailLocation");
+    fillLocationSelect(sel, b.location);
+    sel.onchange = () => { b.location = sel.value; saveState(); render(); };
+
+    // 読了トグル
+    body.querySelector("#stUnread").onclick = () => { b.status = "unread"; saveState(); renderDetail(); render(); };
+    body.querySelector("#stDone").onclick = () => { b.status = "done"; saveState(); renderDetail(); render(); };
+
+    // ログ追加
+    body.querySelector("#logAddBtn").onclick = () => {
+      const page = parseInt(body.querySelector("#logPage").value, 10);
+      const date = body.querySelector("#logDate").value;
+      if (!page || page < 1) { alert("ページ数を入力してください。"); return; }
+      if (!date) { alert("日付を選んでください。"); return; }
+      b.logs = b.logs || [];
+      b.logs.push({ page, date });
+      // 最終ページまで読んだら読了を提案
+      if (b.totalPages && page >= b.totalPages && b.status !== "done") {
+        if (confirm("最後のページまで読みました。読了にしますか？")) b.status = "done";
+      }
+      saveState();
+      renderDetail();
+      render();
+    };
+
+    // ログ削除
+    body.querySelectorAll(".log-del").forEach(btn => {
+      btn.onclick = () => {
+        b.logs.splice(parseInt(btn.dataset.logindex, 10), 1);
+        saveState();
+        renderDetail();
+        render();
+      };
+    });
+
+    // 蔵書 → 検討中へ戻す
+    body.querySelector("#moveToWishBtn").onclick = () => {
+      if (!confirm(`「${b.title}」を検討中リストへ移しますか？`)) return;
+      b.list = "wish";
+      b.location = "";
+      saveState();
+      renderDetail();
+      render();
+    };
+  }
 
   // 本の削除
   body.querySelector("#deleteBookBtn").onclick = () => {
@@ -1063,6 +1158,14 @@ document.getElementById("addGenreBtn").onclick = () => {
   render();
 };
 
+// 蔵書 / 検討中リストの切り替え
+document.getElementById("listTabOwned").onclick = () => { currentList = "owned"; render(); };
+document.getElementById("listTabWish").onclick = () => { currentList = "wish"; render(); };
+
+// 登録確認画面の登録先切り替え
+document.getElementById("destOwned").onclick = () => setPendingList("owned");
+document.getElementById("destWish").onclick = () => setPendingList("wish");
+
 // フリーワード検索(書名・著者)
 document.getElementById("searchInput").addEventListener("input", (e) => {
   searchQuery = e.target.value.trim();
@@ -1080,9 +1183,9 @@ document.getElementById("confirmGenre").onchange = (e) => {
   resolveGenreChoice(e.target, "");
 };
 
-// 連続登録モードの切替(ONのとき登録先の置き場所を表示)
+// 連続登録モードの切替(ONのとき登録先の置き場所を表示。検討中リストでは不要)
 document.getElementById("contMode").onchange = (e) => {
-  document.getElementById("contLocation").hidden = !e.target.checked;
+  document.getElementById("contLocation").hidden = !e.target.checked || currentList === "wish";
 };
 
 document.getElementById("manualAddBtn").onclick = async () => {
