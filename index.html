@@ -140,6 +140,14 @@
       <input type="text" id="newGenreName" placeholder="新しいジャンル（例: SF小説）">
       <button id="addGenreBtn">追加</button>
     </div>
+
+    <div class="section-title" style="margin-top:22px">💾 データの引き継ぎ</div>
+    <p class="transfer-hint">別の端末へ移すには、この端末で「書き出し」したファイルを、新しい端末の「読み込み」で開きます。</p>
+    <div class="btn-row">
+      <button class="btn secondary" id="exportBtn">📤 書き出し</button>
+      <button class="btn secondary" id="importBtn">📥 読み込み</button>
+    </div>
+    <input type="file" id="importFile" accept=".json,application/json,text/plain" hidden>
   </div>
 </div>
 

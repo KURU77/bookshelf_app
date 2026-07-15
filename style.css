@@ -562,6 +562,13 @@ body {
 }
 .edit-info-form { margin: 4px 0 14px; }
 
+.transfer-hint {
+  font-size: .78rem;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+
 /* ---------- iOSズーム対策 ----------
    iOS Safariはフォントが16px未満の入力欄にフォーカスすると
    画面を自動ズームする。全入力欄を16pxに固定して防ぐ */

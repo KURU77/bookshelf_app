@@ -299,7 +299,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "2.1";
+const APP_VERSION = "2.2";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -1118,6 +1118,100 @@ function renderLocList() {
 }
 
 /* ============================================================
+   データの引き継ぎ(エクスポート/インポート)
+   ============================================================ */
+function buildExportJson() {
+  return JSON.stringify({
+    app: "my-bookshelf",
+    formatVersion: 1,
+    appVersion: APP_VERSION,
+    exportedAt: new Date().toISOString(),
+    data: state
+  }, null, 2);
+}
+
+async function exportData() {
+  const json = buildExportJson();
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const filename = `bookshelf-${stamp}.json`;
+  const file = new File([json], filename, { type: "application/json" });
+
+  // iPhoneなどでは共有シート(AirDrop/LINE/メール等)を優先
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: "マイ本棚のデータ" });
+      return;
+    } catch (e) {
+      if (e.name === "AbortError") return; // ユーザーがキャンセル
+      /* 共有に失敗したらダウンロードへフォールバック */
+    }
+  }
+  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/* インポートデータの検証。正しければstate形式のオブジェクトを返す */
+function parseImportJson(text) {
+  const parsed = JSON.parse(text);
+  const d = parsed && parsed.app === "my-bookshelf" ? parsed.data : parsed;
+  if (!d || !Array.isArray(d.books) || !Array.isArray(d.locations)) {
+    throw new Error("形式が違います");
+  }
+  if (!Array.isArray(d.genres)) d.genres = [];
+  d.books.forEach(b => { if (!b.list) b.list = "owned"; });
+  return d;
+}
+
+/* mode: "merge"(統合・重複スキップ) / "replace"(全置き換え) */
+function applyImport(imported, mode) {
+  if (mode === "replace") {
+    state = { ...imported, manualOrder: true };
+  } else {
+    const existingIsbn = new Set(state.books.map(b => b.isbn));
+    const newBooks = imported.books.filter(b => !existingIsbn.has(b.isbn));
+    state.books = state.books.concat(newBooks);
+    for (const l of imported.locations) {
+      if (!state.locations.includes(l)) state.locations.push(l);
+    }
+    for (const g of imported.genres) {
+      if (!state.genres.includes(g)) state.genres.push(g);
+    }
+  }
+  saveState();
+  render();
+}
+
+function importDataFromText(text) {
+  let imported;
+  try {
+    imported = parseImportJson(text);
+  } catch (e) {
+    alert("読み込めませんでした。マイ本棚で書き出したファイルを選んでください。");
+    return;
+  }
+  const merge = confirm(
+    `${imported.books.length}冊のデータを読み込みました。\n\n` +
+    `OK: 今のデータに統合する(同じ本はスキップ)\n` +
+    `キャンセル: 今のデータをすべて置き換える`
+  );
+  if (!merge) {
+    if (!confirm("この端末の現在のデータを消して、読み込んだ内容に置き換えます。\n本当によろしいですか？")) return;
+    applyImport(imported, "replace");
+    alert("置き換えが完了しました。");
+  } else {
+    const before = state.books.length;
+    applyImport(imported, "merge");
+    alert(`統合が完了しました。(${state.books.length - before}冊を追加)`);
+  }
+}
+
+/* ============================================================
    モーダル・ユーティリティ
    ============================================================ */
 function showModal(id) { document.getElementById(id).hidden = false; }
@@ -1175,6 +1269,18 @@ document.getElementById("addGenreBtn").onclick = () => {
   saveState();
   renderGenreList();
   render();
+};
+
+// データの引き継ぎ
+document.getElementById("exportBtn").onclick = exportData;
+document.getElementById("importBtn").onclick = () => document.getElementById("importFile").click();
+document.getElementById("importFile").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ""; // 同じファイルを再選択できるようにリセット
+  if (!file) return;
+  importDataFromText(await file.text());
+  renderLocList();
+  renderGenreList();
 };
 
 // 蔵書 / 検討中リストの切り替え
