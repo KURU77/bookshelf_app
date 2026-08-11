@@ -568,6 +568,16 @@ body {
   line-height: 1.6;
   margin-bottom: 10px;
 }
+.qr-area {
+  margin-top: 14px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #ece6d8;
+  border-radius: var(--radius);
+  text-align: center;
+}
+.qr-area svg { max-width: 200px; height: auto; }
+.qr-area p { font-size: .75rem; color: var(--muted); margin-top: 8px; }
 
 /* ---------- iOSズーム対策 ----------
    iOS Safariはフォントが16px未満の入力欄にフォーカスすると

@@ -299,7 +299,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "2.2";
+const APP_VERSION = "2.3";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -1269,6 +1269,38 @@ document.getElementById("addGenreBtn").onclick = () => {
   saveState();
   renderGenreList();
   render();
+};
+
+// アプリの共有(リンク送信・QRコード表示)
+const APP_URL = "https://kuru77.github.io/bookshelf_app/";
+document.getElementById("shareAppBtn").onclick = async () => {
+  const data = { title: "マイ本棚", text: "本のバーコードを読み取るだけで蔵書管理できる無料アプリ", url: APP_URL };
+  if (navigator.share) {
+    try { await navigator.share(data); } catch (e) { /* キャンセルは無視 */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(APP_URL);
+    alert("リンクをコピーしました:\n" + APP_URL);
+  } catch (e) {
+    prompt("このURLを共有してください", APP_URL);
+  }
+};
+document.getElementById("qrBtn").onclick = () => {
+  const area = document.getElementById("qrArea");
+  if (!area.hidden) { area.hidden = true; return; }
+  area.innerHTML = "";
+  try {
+    const writer = new ZXing.BrowserQRCodeSvgWriter();
+    const svg = writer.write(APP_URL, 200, 200);
+    area.appendChild(svg);
+    const p = document.createElement("p");
+    p.textContent = "友達にこのQRコードを読み取ってもらうとアプリが開きます";
+    area.appendChild(p);
+    area.hidden = false;
+  } catch (e) {
+    alert("QRコードを生成できませんでした。リンク共有をご利用ください。");
+  }
 };
 
 // データの引き継ぎ
