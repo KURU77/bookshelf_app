@@ -299,7 +299,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.4";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -1130,10 +1130,38 @@ function buildExportJson() {
   }, null, 2);
 }
 
+/* ストア版アプリ(Capacitor)で動いているか。
+   WebViewはWeb Share APIやダウンロードに対応しないため処理を分ける */
+function nativePlugins() {
+  const cap = window.Capacitor;
+  if (!cap || !cap.isNativePlatform || !cap.isNativePlatform()) return null;
+  const p = cap.Plugins || {};
+  return p.Filesystem && p.Share ? p : null;
+}
+
 async function exportData() {
   const json = buildExportJson();
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const filename = `bookshelf-${stamp}.json`;
+
+  // ストア版アプリ: 一時ファイルに書き出してOSの共有シートへ渡す
+  const native = nativePlugins();
+  if (native) {
+    try {
+      const written = await native.Filesystem.writeFile({
+        path: filename,
+        data: json,
+        directory: "CACHE",
+        encoding: "utf8"
+      });
+      await native.Share.share({ title: "マイ本棚のデータ", files: [written.uri] });
+    } catch (e) {
+      const msg = (e && e.message) || "";
+      if (!/cancel|abort/i.test(msg)) alert("書き出しに失敗しました。\n" + msg);
+    }
+    return;
+  }
+
   const file = new File([json], filename, { type: "application/json" });
 
   // iPhoneなどでは共有シート(AirDrop/LINE/メール等)を優先
@@ -1275,6 +1303,11 @@ document.getElementById("addGenreBtn").onclick = () => {
 const APP_URL = "https://kuru77.github.io/bookshelf_app/";
 document.getElementById("shareAppBtn").onclick = async () => {
   const data = { title: "マイ本棚", text: "本のバーコードを読み取るだけで蔵書管理できる無料アプリ", url: APP_URL };
+  const native = nativePlugins();
+  if (native) {
+    try { await native.Share.share(data); } catch (e) { /* キャンセルは無視 */ }
+    return;
+  }
   if (navigator.share) {
     try { await navigator.share(data); } catch (e) { /* キャンセルは無視 */ }
     return;
