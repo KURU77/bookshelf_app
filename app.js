@@ -299,7 +299,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "2.4";
+const APP_VERSION = "2.5";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -1378,15 +1378,35 @@ document.getElementById("contMode").onchange = (e) => {
   document.getElementById("contLocation").hidden = !e.target.checked || currentList === "wish";
 };
 
-document.getElementById("manualAddBtn").onclick = async () => {
-  const raw = document.getElementById("manualIsbn").value;
-  const isbn = normalizeIsbn(raw);
-  if (!isbn) { alert("コードの形式が正しくありません。\n(本: 978から始まる13桁または10桁 / 雑誌: 491から始まる13桁)"); return; }
+/* ISBN手入力での登録。連続登録モードがONなら画面を閉じずに
+   次のコードを続けて入力できる(カメラが使えない場所での一括登録用) */
+async function submitManualIsbn() {
+  const input = document.getElementById("manualIsbn");
+  const isbn = normalizeIsbn(input.value);
+  if (!isbn) {
+    alert("コードの形式が正しくありません。\n(本: 978から始まる13桁または10桁 / 雑誌: 491から始まる13桁)");
+    return;
+  }
+  const continuous = document.getElementById("contMode").checked;
+  input.value = "";
+  if (continuous) {
+    // 同じコードを続けて入れ直せるよう、直前コードの抑止を解除しておく
+    lastScannedIsbn = null;
+    scanCooldownUntil = 0;
+    await onScanned(isbn);
+    input.focus();
+    return;
+  }
   stopScanner();
   hideModal("scanModal");
-  document.getElementById("manualIsbn").value = "";
   await lookupAndConfirm(isbn);
-};
+}
+
+document.getElementById("manualAddBtn").onclick = submitManualIsbn;
+// Enterキーでも登録できるようにする(連続入力を速く)
+document.getElementById("manualIsbn").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitManualIsbn(); }
+});
 
 // フィルタボタン
 document.querySelectorAll(".filter-btn").forEach(btn => {
