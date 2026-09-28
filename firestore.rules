@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// マイ本棚 — Cloud Firestore のアクセス規則
+// Firebaseコンソール → Firestore Database → ルール に貼り付けて「公開」する。
+// ログインした本人が、自分の本棚(users/自分のID 以下)だけを読み書きできる。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      match /books/{isbn} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+  }
+}

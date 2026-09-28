@@ -43,7 +43,9 @@ body {
   z-index: 20;
 }
 .app-header h1 { font-size: 1.15rem; }
+.header-right { display: flex; align-items: center; gap: 8px; }
 .header-stats { font-size: .8rem; opacity: .9; }
+.sync-badge { font-size: .9rem; line-height: 1; }
 
 /* ---------- 蔵書/検討中リスト切り替え ---------- */
 .list-switch {
@@ -579,6 +581,20 @@ body {
   line-height: 1.6;
   margin-bottom: 10px;
 }
+
+/* ---------- 端末間の同期 ---------- */
+.sync-account { font-size: .85rem; font-weight: bold; color: var(--green-dark); margin-bottom: 2px; word-break: break-all; }
+.sync-status { font-size: .78rem; color: var(--muted); margin-bottom: 10px; }
+.sync-message {
+  font-size: .78rem;
+  line-height: 1.6;
+  color: var(--green-dark);
+  background: #eef4f1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 10px;
+}
+.empty-sync-hint { font-size: .78rem; margin-top: 10px; }
 .qr-area {
   margin-top: 14px;
   padding: 16px;

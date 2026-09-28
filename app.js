@@ -17,6 +17,8 @@ let searchQuery = "";          // フリーワード検索(書名・著者)
 let pendingBook = null;        // 登録確認中の本
 let pendingList = "owned";     // 登録確認中の登録先リスト
 let detailIsbn = null;         // 詳細表示中の本のISBN
+let baseline = null;           // 前回保存した時点の内容(端末間同期の変更検出に使う)
+takeBaseline();
 
 /* ---------- 保存・読込 ---------- */
 function loadState() {
@@ -31,17 +33,70 @@ function loadState() {
           data.manualOrder = true;
         }
         if (!Array.isArray(data.genres)) data.genres = [];
+        if (!data.tombstones) data.tombstones = {};
         // 旧データ移行: リスト区分(蔵書/検討中)がない本は蔵書扱い
         data.books.forEach(b => { if (!b.list) b.list = "owned"; });
         return data;
       }
     }
   } catch (e) { /* 壊れたデータは初期化 */ }
-  return { books: [], locations: [...DEFAULT_LOCATIONS], genres: [], manualOrder: true };
+  return emptyState();
 }
 
+function emptyState() {
+  return { books: [], locations: [...DEFAULT_LOCATIONS], genres: [], tombstones: {}, manualOrder: true };
+}
+
+/* 保存のたびに前回との差分を調べ、変わった本には更新日時を、消えた本には
+   削除記録(tombstones)を残す。端末間同期で「どちらが新しいか」の判定に使う。
+   (編集する箇所ごとに日時を書き込むと記録漏れが出るため、ここに集約している) */
 function saveState() {
+  stampLocalChanges();
+  writeLocal();
+  if (window.cloudSync) window.cloudSync.onLocalChange();
+}
+
+/* 同期で受け取った変更の保存。受け取った内容を自分の編集と誤認しないよう、
+   日時は付け直さずに比較の基準だけ更新する */
+function saveStateFromSync() {
+  takeBaseline();
+  writeLocal();
+}
+
+function writeLocal() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function bookFingerprint(b) {
+  const { updatedAt, ...rest } = b;
+  return JSON.stringify(rest);
+}
+
+function metaFingerprint(s) {
+  return JSON.stringify([s.locations, s.genres, s.books.map(b => b.isbn)]);
+}
+
+function takeBaseline() {
+  baseline = {
+    books: new Map(state.books.map(b => [b.isbn, bookFingerprint(b)])),
+    meta: metaFingerprint(state)
+  };
+}
+
+function stampLocalChanges() {
+  const now = Date.now();
+  if (!state.tombstones) state.tombstones = {};
+  const present = new Set();
+  for (const b of state.books) {
+    present.add(b.isbn);
+    if (baseline.books.get(b.isbn) !== bookFingerprint(b)) b.updatedAt = now;
+    delete state.tombstones[b.isbn];   // 削除した本を登録し直した場合
+  }
+  for (const isbn of baseline.books.keys()) {
+    if (!present.has(isbn)) state.tombstones[isbn] = now;
+  }
+  if (baseline.meta !== metaFingerprint(state)) state.metaUpdatedAt = now;
+  takeBaseline();
 }
 
 /* ============================================================
@@ -142,7 +197,8 @@ function renderGrid() {
   empty.hidden = books.length > 0;
   empty.innerHTML = currentList === "wish"
     ? `<p>検討中の本はまだありません。</p><p>スキャン時に登録先を「🛒 検討中」にすると追加できます。</p>`
-    : `<p>まだ本がありません。</p><p>「＋ スキャン」でバーコードを読み取って登録しましょう。</p>`;
+    : `<p>まだ本がありません。</p><p>「＋ スキャン」でバーコードを読み取って登録しましょう。</p>` +
+      `<p class="empty-sync-hint">他の端末で使っている場合は「⚙ 管理」→「端末間の同期」でログインすると、本棚が届きます。</p>`;
 
   for (const b of books) {
     const card = document.createElement("div");
@@ -299,7 +355,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "2.5";
+const APP_VERSION = "2.6";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -1428,5 +1484,33 @@ document.querySelectorAll("[data-close]").forEach(btn => {
 document.querySelectorAll(".modal").forEach(m => {
   m.addEventListener("click", e => { if (e.target === m) hideModal(m.id); });
 });
+
+/* 端末間同期(sync.js)との窓口 */
+window.bookshelf = {
+  getState: () => state,
+  // 受け取った変更を保存して画面に反映する(自分の編集としては扱わない)
+  commitRemoteChanges() {
+    saveStateFromSync();
+    refreshAfterSync();
+  },
+  // 別アカウントの本棚を引き継がない場合に、この端末の本棚を空にする
+  resetLocal() {
+    state = emptyState();
+    saveStateFromSync();
+    render();
+  },
+  // 並べ替えの最中は、受け取った変更の反映を待たせる
+  isBusy: () => !!dragCtx
+};
+
+function refreshAfterSync() {
+  render();
+  const modal = document.getElementById("detailModal");
+  if (modal.hidden) return;
+  // ページ数などを入力している最中は、書きかけが消えないよう詳細画面を描き直さない
+  const el = document.activeElement;
+  const typing = el && modal.contains(el) && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+  if (!typing) renderDetail();
+}
 
 render();
