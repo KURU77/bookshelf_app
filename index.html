@@ -195,8 +195,18 @@
 <script>
 // PWA: Service Worker登録（オフライン対応・ホーム画面アプリ化）
 if ("serviceWorker" in navigator) {
+  // 新しい版に切り替わったら、起動直後に限り1回だけ読み込み直して最新版を表示する
+  // (操作の途中で急に画面が再読み込みされないよう、起動から10秒以内に限る)
+  const hadController = !!navigator.serviceWorker.controller;
+  const startedAt = Date.now();
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloaded || Date.now() - startedAt > 10000) return;
+    reloaded = true;
+    location.reload();
+  });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
   });
 }
 </script>
