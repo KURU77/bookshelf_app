@@ -173,7 +173,7 @@ function visibleBooks() {
     }
     if (currentGenre === "none") { if (b.genre) return false; }
     else if (currentGenre !== "all" && b.genre !== currentGenre) return false;
-    if (q && !`${b.title} ${b.author}`.toLowerCase().includes(q)) return false;
+    if (q && !`${b.title} ${b.author} ${b.memo || ""}`.toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -220,6 +220,7 @@ function renderGrid() {
     card.innerHTML = `
       ${coverHtml}
       ${badgeHtml}
+      ${b.memo ? `<span class="memo-mark" title="メモあり">📝</span>` : ""}
       ${progressHtml}
       <div class="book-title">${escapeHtml(b.title)}</div>
     `;
@@ -355,7 +356,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "2.8";
+const APP_VERSION = "2.9";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -801,10 +802,28 @@ function setPendingList(list) {
 /* ============================================================
    本の詳細
    ============================================================ */
+let memoTimer = null;       // メモの保存待ち
+let memoSavedTimer = null;
+
 function openDetail(isbn) {
+  flushMemo();
   detailIsbn = isbn;
   renderDetail();
   showModal("detailModal");
+}
+
+/* 書きかけのメモを保存する(入力の手が止まったとき・欄を離れたとき・アプリを閉じるとき) */
+function flushMemo() {
+  if (!memoTimer) return;
+  clearTimeout(memoTimer);
+  memoTimer = null;
+  saveState();
+  render();   // 一覧の📝印を更新する
+  const saved = document.getElementById("memoSaved");
+  if (!saved) return;
+  saved.hidden = false;
+  clearTimeout(memoSavedTimer);
+  memoSavedTimer = setTimeout(() => { saved.hidden = true; }, 1500);
 }
 
 function renderDetail() {
@@ -858,6 +877,13 @@ function renderDetail() {
     </div>
   `;
 
+  const memoHtml = `
+    <div class="section-title">📝 メモ <span class="memo-hint">入力すると自動で保存されます</span></div>
+    <textarea class="memo-input" id="memoInput" rows="3" maxlength="5000"
+      placeholder="感想、貸した相手、買ったお店、気になったページなど">${escapeHtml(b.memo || "")}</textarea>
+    <p class="memo-saved" id="memoSaved" hidden>✓ 保存しました</p>
+  `;
+
   if (isWish) {
     // 検討中の本: 読書記録の代わりに「蔵書に移す」ブロックを表示
     body.innerHTML = `
@@ -865,6 +891,7 @@ function renderDetail() {
       <label class="field-label">ジャンル
         <select id="detailGenre"></select>
       </label>
+      ${memoHtml}
 
       <div class="section-title">📚 購入したら蔵書へ</div>
       <label class="field-label">置き場所を選んでください
@@ -896,6 +923,7 @@ function renderDetail() {
       <label class="field-label">ジャンル
         <select id="detailGenre"></select>
       </label>
+      ${memoHtml}
 
       <div class="section-title">📖 読書の記録</div>
       <div class="log-form">
@@ -932,6 +960,25 @@ function renderDetail() {
     renderDetail();
     render();
   };
+
+  // メモ(入力のたびに本へ書き込み、少し間をおいて保存する)
+  const memo = body.querySelector("#memoInput");
+  const growMemo = () => {
+    memo.style.height = "auto";
+    memo.style.height = memo.scrollHeight + "px";
+  };
+  growMemo();
+  memo.addEventListener("input", () => {
+    // 同期で本のデータが差し替わっていても、今の本に書き込む
+    const cur = state.books.find(x => x.isbn === b.isbn);
+    if (!cur) return;
+    if (memo.value) cur.memo = memo.value;
+    else delete cur.memo;
+    growMemo();
+    clearTimeout(memoTimer);
+    memoTimer = setTimeout(flushMemo, 600);
+  });
+  memo.addEventListener("blur", flushMemo);
 
   // ジャンルセレクト(共通)
   const gsel = body.querySelector("#detailGenre");
@@ -1302,6 +1349,7 @@ function showModal(id) { document.getElementById(id).hidden = false; }
 function hideModal(id) {
   document.getElementById(id).hidden = true;
   if (id === "scanModal") stopScanner();
+  if (id === "detailModal") flushMemo();
 }
 
 function escapeHtml(s) {
@@ -1472,6 +1520,11 @@ document.querySelectorAll(".filter-btn").forEach(btn => {
     currentFilter = btn.dataset.filter;
     render();
   };
+});
+
+// アプリを閉じる・切り替える直前に、書きかけのメモを保存する
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushMemo();
 });
 
 // 長押し時にOSのメニュー(画像保存・右クリック)が出ないようにする

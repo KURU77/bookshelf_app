@@ -575,6 +575,36 @@ body {
 }
 .edit-info-form { margin: 4px 0 14px; }
 
+/* ---------- メモ ---------- */
+.memo-hint { font-size: .7rem; font-weight: normal; color: var(--muted); margin-left: 6px; }
+.memo-input {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1.5px solid #d8d2c2;
+  border-radius: 8px;
+  font-family: inherit;
+  line-height: 1.6;
+  color: var(--text);
+  background: #fff;
+  resize: vertical;
+  overflow: hidden;
+}
+.memo-input:focus { outline: none; border-color: var(--green); }
+.memo-saved { font-size: .72rem; color: var(--green); margin-top: 4px; }
+.memo-mark {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: .7rem;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .15);
+}
+
 .transfer-hint {
   font-size: .78rem;
   color: var(--muted);
