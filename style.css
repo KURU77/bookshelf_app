@@ -575,6 +575,85 @@ body {
 }
 .edit-info-form { margin: 4px 0 14px; }
 
+/* ---------- ジャンル(1冊に最大3つ) ---------- */
+.genre-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 16px; }
+.genre-chip {
+  border: 1.5px solid #d8d2c2;
+  background: #fff;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: .82rem;
+  cursor: pointer;
+}
+.genre-chip.on { border-color: var(--green); background: var(--green); color: #fff; }
+.genre-chip.add { border-style: dashed; color: var(--green-dark); background: transparent; }
+
+/* ---------- 定価 ---------- */
+.detail-price { color: var(--green-dark) !important; font-weight: bold; }
+.detail-price.none { color: var(--muted) !important; font-weight: normal; }
+.price-fetch-btn {
+  border: 1px solid #d8d2c2;
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: .72rem;
+  color: var(--green-dark);
+  cursor: pointer;
+  margin-left: 4px;
+}
+.confirm-price { color: var(--green-dark) !important; font-weight: bold; }
+.book-price { font-size: .72rem; font-weight: bold; color: var(--green-dark); }
+
+/* ---------- 検討中リストのカート ---------- */
+.cart-bar {
+  margin: 0 16px 4px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius);
+}
+.cart-bar[hidden] { display: none; }
+.cart-summary { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.cart-title { font-weight: bold; color: var(--green-dark); }
+.cart-total { font-size: 1.15rem; font-weight: bold; color: var(--accent); }
+.cart-note, .cart-empty { font-size: .74rem; color: var(--muted); line-height: 1.6; margin-top: 4px; }
+.cart-empty { margin-top: 0; }
+.cart-filter-btn {
+  margin-top: 8px;
+  border: none;
+  background: #f6e7d8;
+  color: #8a4b12;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: .78rem;
+  cursor: pointer;
+}
+.status-badge.cart { background: var(--accent); }
+.cart-toggle { width: 100%; margin-bottom: 4px; }
+
+/* ---------- ネットで探す ---------- */
+.shop-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.shop-link {
+  flex: 1 1 30%;
+  min-width: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.35;
+  text-align: center;
+  text-decoration: none;
+  font-size: .82rem;
+  font-weight: bold;
+  padding: 10px 6px;
+  border-radius: 10px;
+  color: #fff;
+}
+.shop-link.amazon { background: #232f3e; }
+.shop-link.yahoo { background: #ff0033; }
+.shop-link.rakuten { background: #bf0000; }
+.shop-note { font-size: .72rem; color: var(--muted); line-height: 1.6; margin-top: 6px; }
+
 /* ---------- メモ ---------- */
 .memo-hint { font-size: .7rem; font-weight: normal; color: var(--muted); margin-left: 6px; }
 .memo-input {

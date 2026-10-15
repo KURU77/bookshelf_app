@@ -14,8 +14,10 @@ let currentLocation = "all";   // "all" または置き場所名
 let currentFilter = "all";     // all / unread / reading / done
 let currentGenre = "all";      // "all" / "none"(未分類) / ジャンル名
 let searchQuery = "";          // フリーワード検索(書名・著者)
+let cartOnly = false;          // 検討中リストで、カートに入れた本だけを表示する
 let pendingBook = null;        // 登録確認中の本
 let pendingList = "owned";     // 登録確認中の登録先リスト
+let pendingGenres = [];        // 登録確認中に選んだジャンル
 let detailIsbn = null;         // 詳細表示中の本のISBN
 let baseline = null;           // 前回保存した時点の内容(端末間同期の変更検出に使う)
 takeBaseline();
@@ -34,8 +36,7 @@ function loadState() {
         }
         if (!Array.isArray(data.genres)) data.genres = [];
         if (!data.tombstones) data.tombstones = {};
-        // 旧データ移行: リスト区分(蔵書/検討中)がない本は蔵書扱い
-        data.books.forEach(b => { if (!b.list) b.list = "owned"; });
+        data.books.forEach(normalizeBook);
         return data;
       }
     }
@@ -45,6 +46,17 @@ function loadState() {
 
 function emptyState() {
   return { books: [], locations: [...DEFAULT_LOCATIONS], genres: [], tombstones: {}, manualOrder: true };
+}
+
+/* 古い形式の本を今の形式にそろえる(読み込み時・取り込み時・同期で受け取ったとき) */
+function normalizeBook(b) {
+  // リスト区分(蔵書/検討中)がない本は蔵書扱い
+  if (!b.list) b.list = "owned";
+  // ジャンルは1冊につき最大3つのリストで持つ(以前は1つだけの genre)
+  if (!Array.isArray(b.genres)) b.genres = b.genre ? [b.genre] : [];
+  delete b.genre;
+  // カートは検討中の本だけのもの
+  if (b.list !== "wish") delete b.inCart;
 }
 
 /* 保存のたびに前回との差分を調べ、変わった本には更新日時を、消えた本には
@@ -106,8 +118,49 @@ function render() {
   renderListSwitch();
   renderTabs();
   renderGenreFilter();
+  renderCartBar();
   renderGrid();
   renderHeaderStats();
+}
+
+/* ---------- 価格 ---------- */
+function yen(n) {
+  return "¥" + Number(n).toLocaleString("ja-JP");
+}
+
+/* 「¥638（税込）・本体¥580」のような表示 */
+function priceText(b) {
+  if (!b.price || !b.price.total) return "";
+  const base = b.price.base ? `・本体${yen(b.price.base)}` : "";
+  return `${yen(b.price.total)}（税込）${base}`;
+}
+
+/* ---------- 検討中リストのカート ---------- */
+function renderCartBar() {
+  const bar = document.getElementById("cartBar");
+  if (currentList !== "wish") {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const inCart = state.books.filter(b => b.list === "wish" && b.inCart);
+  if (!inCart.length) {
+    cartOnly = false;
+    bar.innerHTML = `<p class="cart-empty">🛒 本の詳細で「カートに入れる」を押すと、買うといくらになるかの目安がここに表示されます。</p>`;
+    return;
+  }
+  const priced = inCart.filter(b => b.price && b.price.total);
+  const total = priced.reduce((sum, b) => sum + b.price.total, 0);
+  const unknown = inCart.length - priced.length;
+  bar.innerHTML = `
+    <div class="cart-summary">
+      <span class="cart-title">🛒 カート ${inCart.length}冊</span>
+      <span class="cart-total">合計 ${yen(total)}</span>
+    </div>
+    <p class="cart-note">定価（税込）の合計です。送料やポイントは含みません。${unknown ? `価格が分からない${unknown}冊は合計に入っていません。` : ""}</p>
+    <button class="cart-filter-btn" id="cartFilterBtn">${cartOnly ? "検討中の本をすべて表示" : "カートの本だけ表示"}</button>
+  `;
+  document.getElementById("cartFilterBtn").onclick = () => { cartOnly = !cartOnly; render(); };
 }
 
 function renderListSwitch() {
@@ -171,8 +224,9 @@ function visibleBooks() {
       if (currentLocation !== "all" && b.location !== currentLocation) return false;
       if (currentFilter !== "all" && bookStatus(b) !== currentFilter) return false;
     }
-    if (currentGenre === "none") { if (b.genre) return false; }
-    else if (currentGenre !== "all" && b.genre !== currentGenre) return false;
+    if (currentList === "wish" && cartOnly && !b.inCart) return false;
+    if (currentGenre === "none") { if (b.genres.length) return false; }
+    else if (currentGenre !== "all" && !b.genres.includes(currentGenre)) return false;
     if (q && !`${b.title} ${b.author} ${b.memo || ""}`.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -215,14 +269,20 @@ function renderGrid() {
     const progressHtml = progress !== null
       ? `<div class="progress-mini"><div style="width:${progress}%"></div></div>` : "";
 
-    const badgeHtml = (b.list || "owned") === "owned"
-      ? `<span class="status-badge ${st}">${STATUS_LABEL[st]}</span>` : "";
+    const isWish = b.list === "wish";
+    const badgeHtml = isWish
+      ? (b.inCart ? `<span class="status-badge cart">🛒 カート</span>` : "")
+      : `<span class="status-badge ${st}">${STATUS_LABEL[st]}</span>`;
+    // 検討中の本は、買うときの目安になるよう定価も表示する
+    const priceHtml = isWish && b.price && b.price.total
+      ? `<div class="book-price">${yen(b.price.total)}</div>` : "";
     card.innerHTML = `
       ${coverHtml}
       ${badgeHtml}
       ${b.memo ? `<span class="memo-mark" title="メモあり">📝</span>` : ""}
       ${progressHtml}
       <div class="book-title">${escapeHtml(b.title)}</div>
+      ${priceHtml}
     `;
     card.onclick = () => { if (suppressClick) return; openDetail(b.isbn); };
     attachDragHandlers(card);
@@ -356,7 +416,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "2.9";
+const APP_VERSION = "3.0";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -551,9 +611,10 @@ async function onScanned(isbn) {
     publisher: info.publisher,
     cover: info.cover,
     totalPages: info.totalPages,
+    ...(info.price ? { price: info.price } : {}),
     list: currentList, // 今見ているリスト(蔵書/検討中)に登録
     location: currentList === "wish" ? "" : document.getElementById("contLocation").value,
-    genre: "",
+    genres: [],
     status: "unread",
     logs: [],
     addedAt: Date.now()
@@ -589,9 +650,77 @@ async function fetchOpenBd(isbn) {
       author: (s.author || "").replace(/／著|／作|／文/g, "").trim(),
       publisher: s.publisher || "",
       cover: s.cover || "",
-      totalPages
+      totalPages,
+      price: priceFromOpenBd(data[0])
     };
   } catch (e) { return null; }
+}
+
+/* openBDの出版社情報(ONIX)から定価を取り出す。
+   日本の本は本体価格(税抜)で登録されているので、消費税10%を加えた額も持つ */
+function priceFromOpenBd(item) {
+  try {
+    const prices = item.onix.ProductSupply.SupplyDetail.Price || [];
+    const p = prices.find(x => !x.CurrencyCode || x.CurrencyCode === "JPY");
+    const amount = p && parseInt(p.PriceAmount, 10);
+    if (!amount) return null;
+    // PriceType 02/04 は税込、それ以外(01/03)は税抜
+    if (p.PriceType === "02" || p.PriceType === "04") return { total: amount, source: "openbd" };
+    return { base: amount, total: Math.floor(amount * 11 / 10), source: "openbd" };
+  } catch (e) {
+    return null;
+  }
+}
+
+/* 複数の本の定価をまとめて取得する。
+   prices: 見つかった本の定価 / checked: 問い合わせに成功した本(見つからなかった本も含む) */
+async function fetchPrices(isbns) {
+  const prices = {};
+  const checked = [];
+  for (let i = 0; i < isbns.length; i += 50) {
+    const chunk = isbns.slice(i, i + 50);
+    try {
+      const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${chunk.join(",")}`);
+      const data = await res.json();
+      data.forEach((item, k) => {
+        const price = item && priceFromOpenBd(item);
+        if (price) prices[chunk[k]] = price;
+      });
+      checked.push(...chunk);
+    } catch (e) { /* 通信できなかった分は次回また問い合わせる */ }
+  }
+  return { prices, checked };
+}
+
+/* 定価を持っていない登録済みの本に、出版社の定価を補う(起動後に裏で1回)。
+   見つからなかった本はこの端末に記録し、毎回問い合わせないようにする */
+const PRICE_CHECK_KEY = "my-bookshelf-pricecheck";
+
+async function backfillPrices() {
+  if (!navigator.onLine) return;
+  let done = {};
+  try { done = JSON.parse(localStorage.getItem(PRICE_CHECK_KEY)) || {}; } catch (e) { /* 初回 */ }
+  const targets = state.books
+    .filter(b => !b.price && !done[b.isbn] && /^97[89]\d{10}$/.test(b.isbn))
+    .map(b => b.isbn);
+  if (!targets.length) return;
+
+  const { prices, checked } = await fetchPrices(targets);
+  let changed = false;
+  for (const isbn of checked) {
+    done[isbn] = Date.now();
+    // 取得中に同期で差し替わっていても、今の本に書き込む
+    const cur = state.books.find(b => b.isbn === isbn);
+    if (cur && !cur.price && prices[isbn]) {
+      cur.price = prices[isbn];
+      changed = true;
+    }
+  }
+  localStorage.setItem(PRICE_CHECK_KEY, JSON.stringify(done));
+  if (changed) {
+    saveState();
+    render();
+  }
 }
 
 async function fetchGoogleBooks(isbn) {
@@ -671,7 +800,7 @@ async function fetchBookInfo(isbn) {
   // 雑誌(491コード)は号ごとの書誌データベースが存在しないため手入力登録にする
   if (isMagazineCode(isbn)) return null;
   const fetchers = [fetchOpenBd, fetchGoogleBooks, fetchOpenLibrary];
-  const merged = { title: "", author: "", publisher: "", cover: "", totalPages: null };
+  const merged = { title: "", author: "", publisher: "", cover: "", totalPages: null, price: null };
   let found = false;
   for (const f of fetchers) {
     if (found && merged.title && merged.cover && merged.totalPages) break;
@@ -683,6 +812,7 @@ async function fetchBookInfo(isbn) {
     merged.publisher = merged.publisher || r.publisher;
     merged.cover = merged.cover || r.cover;
     merged.totalPages = merged.totalPages || r.totalPages;
+    merged.price = merged.price || r.price || null;
   }
   if (!found) return null;
   return {
@@ -691,7 +821,8 @@ async function fetchBookInfo(isbn) {
     author: merged.author,
     publisher: merged.publisher,
     cover: await resolveCover(isbn, merged.cover),
-    totalPages: merged.totalPages
+    totalPages: merged.totalPages,
+    price: merged.price
   };
 }
 
@@ -708,7 +839,8 @@ async function lookupAndConfirm(isbn) {
   const body = document.getElementById("confirmBody");
   body.innerHTML = `<p style="padding:20px 0;color:var(--muted)">検索中… (ISBN: ${isbn})</p>`;
   fillLocationSelect(document.getElementById("confirmLocation"));
-  fillGenreSelect(document.getElementById("confirmGenre"), "");
+  pendingGenres = [];
+  renderGenreChips(document.getElementById("confirmGenres"), pendingGenres, (next) => { pendingGenres = next; });
   setPendingList(currentList); // 今見ているリストを登録先の初期値に
   showModal("confirmModal");
 
@@ -737,6 +869,7 @@ async function lookupAndConfirm(isbn) {
         <input class="edit-field" id="editAuthor" placeholder="著者">
         <input class="edit-field" id="editPublisher" placeholder="出版社">
         <input class="edit-field" id="editPages" type="number" inputmode="numeric" placeholder="総ページ数">
+        <input class="edit-field" id="editPrice" type="number" inputmode="numeric" placeholder="定価（税込・円）">
         <p style="margin-top:6px">${codeLabel(isbn)}: ${isbn}</p>
       </div>
     `;
@@ -749,6 +882,7 @@ async function lookupAndConfirm(isbn) {
         <p>${escapeHtml(info.publisher)}</p>
         <p>ISBN: ${isbn}</p>
         ${info.totalPages ? `<p>${info.totalPages}ページ</p>` : ""}
+        ${info.price ? `<p class="confirm-price">定価 ${priceText(info)}</p>` : ""}
       </div>
     `;
   }
@@ -757,9 +891,8 @@ async function lookupAndConfirm(isbn) {
 function addPendingBook() {
   if (!pendingBook) return;
   const loc = document.getElementById("confirmLocation").value;
-  const genreVal = document.getElementById("confirmGenre").value;
 
-  let { title, author, publisher, totalPages } = pendingBook;
+  let { title, author, publisher, totalPages, price } = pendingBook;
   // 手入力フォームがある場合(書誌情報が見つからなかった本)はその値を使う
   const titleInput = document.getElementById("editTitle");
   if (titleInput) {
@@ -768,6 +901,8 @@ function addPendingBook() {
     publisher = document.getElementById("editPublisher").value.trim();
     const p = parseInt(document.getElementById("editPages").value, 10);
     totalPages = p > 0 ? p : null;
+    const yenValue = parseInt(document.getElementById("editPrice").value, 10);
+    price = yenValue > 0 ? { total: yenValue, source: "manual" } : null;
   }
 
   state.books.unshift({
@@ -777,9 +912,10 @@ function addPendingBook() {
     publisher,
     cover: pendingBook.cover,
     totalPages,
+    ...(price ? { price } : {}),
     list: pendingList,
     location: pendingList === "wish" ? "" : loc,
-    genre: genreVal === "__new" ? "" : genreVal,
+    genres: pendingGenres,
     status: "unread",
     logs: [],
     addedAt: Date.now()
@@ -851,6 +987,12 @@ function renderDetail() {
 
   const isWish = b.list === "wish";
 
+  // 定価。出版社の情報が無い本は、ボタンで取り直すか手入力できる
+  const canFetchPrice = /^97[89]\d{10}$/.test(b.isbn);
+  const priceLineHtml = b.price && b.price.total
+    ? `<p class="detail-price">定価 ${priceText(b)}${b.price.source === "manual" ? "（手入力）" : ""}</p>`
+    : `<p class="detail-price none">定価 未登録${canFetchPrice ? ` <button class="price-fetch-btn" id="priceFetchBtn">↻ 取得</button>` : ""}</p>`;
+
   const commonTop = `
     <div class="detail-top">
       ${coverHtml}
@@ -861,6 +1003,7 @@ function renderDetail() {
         <p>${escapeHtml(b.publisher)}</p>
         <p>${codeLabel(b.isbn)}: ${b.isbn}</p>
         ${b.totalPages ? `<p>全${b.totalPages}ページ</p>` : ""}
+        ${priceLineHtml}
         <button class="edit-info-btn" id="editInfoBtn">✎ 情報を編集</button>
       </div>
     </div>
@@ -870,6 +1013,7 @@ function renderDetail() {
       <input class="edit-field" id="dEditAuthor" placeholder="著者" value="${escapeHtml(b.author)}">
       <input class="edit-field" id="dEditPublisher" placeholder="出版社" value="${escapeHtml(b.publisher)}">
       <input class="edit-field" id="dEditPages" type="number" inputmode="numeric" placeholder="総ページ数" value="${b.totalPages || ""}">
+      <input class="edit-field" id="dEditPrice" type="number" inputmode="numeric" placeholder="定価（税込・円）" value="${b.price && b.price.total ? b.price.total : ""}">
       <div class="btn-row" style="margin-top:8px">
         <button class="btn secondary" id="dEditCancel">キャンセル</button>
         <button class="btn primary" id="dEditSave">保存</button>
@@ -884,13 +1028,31 @@ function renderDetail() {
     <p class="memo-saved" id="memoSaved" hidden>✓ 保存しました</p>
   `;
 
+  const genreHtml = `
+    <div class="field-label">ジャンル（${MAX_GENRES}つまで選べます）</div>
+    <div class="genre-chips" id="detailGenres"></div>
+  `;
+
+  const links = shopLinks(b);
+  const shopHtml = `
+    <div class="section-title">🛍 ネットで探す</div>
+    <div class="shop-links">
+      <a class="shop-link amazon" href="${escapeHtml(links.amazon)}" target="_blank" rel="noopener">Amazon</a>
+      <a class="shop-link yahoo" href="${escapeHtml(links.yahoo)}" target="_blank" rel="noopener">Yahoo!ショッピング</a>
+      <a class="shop-link rakuten" href="${escapeHtml(links.rakuten)}" target="_blank" rel="noopener">楽天市場</a>
+    </div>
+    <p class="shop-note">国内の新品の本は定価で販売されるため、どのお店でも本の値段はほぼ同じです（送料やポイントはお店ごとに異なります）。</p>
+  `;
+
   if (isWish) {
-    // 検討中の本: 読書記録の代わりに「蔵書に移す」ブロックを表示
+    // 検討中の本: 読書記録の代わりに、カート・お店へのリンク・「蔵書に移す」を表示
     body.innerHTML = `
       ${commonTop}
-      <label class="field-label">ジャンル
-        <select id="detailGenre"></select>
-      </label>
+      <button class="btn ${b.inCart ? "secondary" : "primary"} cart-toggle" id="cartToggleBtn">
+        ${b.inCart ? "✓ カートに入っています（外す）" : "🛒 カートに入れる"}
+      </button>
+      ${shopHtml}
+      ${genreHtml}
       ${memoHtml}
 
       <div class="section-title">📚 購入したら蔵書へ</div>
@@ -920,9 +1082,7 @@ function renderDetail() {
       <label class="field-label">置き場所
         <select id="detailLocation"></select>
       </label>
-      <label class="field-label">ジャンル
-        <select id="detailGenre"></select>
-      </label>
+      ${genreHtml}
       ${memoHtml}
 
       <div class="section-title">📖 読書の記録</div>
@@ -932,6 +1092,7 @@ function renderDetail() {
         <button id="logAddBtn">記録</button>
       </div>
       ${logsHtml}
+      ${shopHtml}
 
       <div class="btn-row" style="margin-top:20px">
         <button class="btn secondary" id="moveToWishBtn">🛒 検討中へ移す</button>
@@ -956,10 +1117,43 @@ function renderDetail() {
     b.publisher = body.querySelector("#dEditPublisher").value.trim();
     const p = parseInt(body.querySelector("#dEditPages").value, 10);
     b.totalPages = p > 0 ? p : null;
+    // 定価を書き換えたときだけ手入力の値にする(出版社の情報はそのまま残す)
+    const yenValue = parseInt(body.querySelector("#dEditPrice").value, 10);
+    if (!(yenValue > 0)) delete b.price;
+    else if (!b.price || b.price.total !== yenValue) b.price = { total: yenValue, source: "manual" };
     saveState();
     renderDetail();
     render();
   };
+
+  // 定価を出版社の情報から取り直す
+  const priceFetchBtn = body.querySelector("#priceFetchBtn");
+  if (priceFetchBtn) {
+    priceFetchBtn.onclick = async () => {
+      priceFetchBtn.disabled = true;
+      priceFetchBtn.textContent = "取得中…";
+      const { prices } = await fetchPrices([b.isbn]);
+      const cur = state.books.find(x => x.isbn === b.isbn);
+      if (cur && prices[b.isbn]) {
+        cur.price = prices[b.isbn];
+        saveState();
+        render();
+        renderDetail();
+      } else {
+        priceFetchBtn.textContent = "見つかりませんでした";
+      }
+    };
+  }
+
+  // ジャンル(最大3つ)
+  renderGenreChips(body.querySelector("#detailGenres"), b.genres, (next) => {
+    // 同期で本のデータが差し替わっていても、今の本に書き込む
+    const cur = state.books.find(x => x.isbn === b.isbn);
+    if (!cur) return;
+    cur.genres = next;
+    saveState();
+    render();
+  });
 
   // メモ(入力のたびに本へ書き込み、少し間をおいて保存する)
   const memo = body.querySelector("#memoInput");
@@ -980,23 +1174,23 @@ function renderDetail() {
   });
   memo.addEventListener("blur", flushMemo);
 
-  // ジャンルセレクト(共通)
-  const gsel = body.querySelector("#detailGenre");
-  fillGenreSelect(gsel, b.genre || "");
-  gsel.onchange = () => {
-    const v = resolveGenreChoice(gsel, b.genre || "");
-    b.genre = v;
-    saveState();
-    render();
-  };
-
   if (isWish) {
+    // カートに入れる・外す
+    body.querySelector("#cartToggleBtn").onclick = () => {
+      if (b.inCart) delete b.inCart;
+      else b.inCart = true;
+      saveState();
+      renderDetail();
+      render();
+    };
+
     // 検討中 → 蔵書へ移動(購入時)
     const msel = body.querySelector("#moveLocation");
     fillLocationSelect(msel);
     body.querySelector("#moveToOwnedBtn").onclick = () => {
       b.list = "owned";
       b.location = msel.value;
+      delete b.inCart;
       saveState();
       renderDetail();
       render();
@@ -1062,25 +1256,60 @@ function renderDetail() {
 /* ============================================================
    ジャンル
    ============================================================ */
-function fillGenreSelect(sel, selected) {
-  sel.innerHTML = "";
-  sel.appendChild(new Option("（ジャンルなし）", ""));
-  for (const g of state.genres) sel.appendChild(new Option(g, g));
-  sel.appendChild(new Option("＋ 新しいジャンルを追加…", "__new"));
-  sel.value = selected && state.genres.includes(selected) ? selected : "";
+const MAX_GENRES = 3;   // 1冊に付けられるジャンルの数
+
+/* ジャンルを選ぶボタン群。押すたびに選択を切り替え、新しい選択を onChange に渡す */
+function renderGenreChips(container, selected, onChange) {
+  const change = (next) => {
+    onChange(next);
+    renderGenreChips(container, next, onChange);
+  };
+  container.innerHTML = "";
+  for (const g of state.genres) {
+    const on = selected.includes(g);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "genre-chip" + (on ? " on" : "");
+    chip.textContent = (on ? "✓ " : "") + g;
+    chip.onclick = () => {
+      if (on) change(selected.filter(x => x !== g));
+      else if (selected.length >= MAX_GENRES) alert(`ジャンルは1冊につき${MAX_GENRES}つまで選べます。\n別のジャンルを外してから選んでください。`);
+      else change([...selected, g]);
+    };
+    container.appendChild(chip);
+  }
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "genre-chip add";
+  add.textContent = "＋ 新しいジャンル";
+  add.onclick = () => {
+    const name = (prompt("新しいジャンル名を入力してください") || "").trim();
+    if (!name) return;
+    if (!state.genres.includes(name)) {
+      state.genres.push(name);
+      saveState();
+      render();
+    }
+    // 作ったジャンルは、枠が空いていればそのまま選んだ状態にする
+    if (!selected.includes(name) && selected.length < MAX_GENRES) change([...selected, name]);
+    else renderGenreChips(container, selected, onChange);
+  };
+  container.appendChild(add);
 }
 
-/* 「＋新しいジャンル」が選ばれたらprompt入力→登録し、確定した値を返す */
-function resolveGenreChoice(sel, prevValue) {
-  if (sel.value !== "__new") return sel.value;
-  const name = (prompt("新しいジャンル名を入力してください") || "").trim();
-  if (name && !state.genres.includes(name)) {
-    state.genres.push(name);
-    saveState();
-  }
-  const finalValue = name && state.genres.includes(name) ? name : prevValue;
-  fillGenreSelect(sel, finalValue);
-  return finalValue;
+/* ---------- ネットショップへのリンク ---------- */
+function shopLinks(b) {
+  const code = b.isbn;
+  const isbn10 = isbn13to10(code);
+  // 雑誌はAmazonではコード検索が当たりにくいため誌名で探す
+  const amazonQuery = isMagazineCode(code) ? b.title : code;
+  return {
+    amazon: isbn10 && !isMagazineCode(code)
+      ? `https://www.amazon.co.jp/dp/${isbn10}`
+      : `https://www.amazon.co.jp/s?k=${encodeURIComponent(amazonQuery)}`,
+    yahoo: `https://shopping.yahoo.co.jp/search?p=${encodeURIComponent(code)}`,
+    rakuten: `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(code)}/`
+  };
 }
 
 function renderGenreList() {
@@ -1090,7 +1319,7 @@ function renderGenreList() {
     ul.innerHTML = `<li style="color:var(--muted);font-size:.82rem">まだジャンルがありません</li>`;
   }
   state.genres.forEach((g, i) => {
-    const count = state.books.filter(b => b.genre === g).length;
+    const count = state.books.filter(b => b.genres.includes(g)).length;
     const li = document.createElement("li");
     li.innerHTML = `<span class="loc-name">${escapeHtml(g)} <small style="color:var(--muted)">(${count}冊)</small></span>`;
     const actions = document.createElement("div");
@@ -1107,7 +1336,7 @@ function renderGenreList() {
       if (!name || name === g) return;
       if (state.genres.includes(name)) { alert("同じ名前のジャンルがあります。"); return; }
       state.genres[i] = name;
-      state.books.forEach(b => { if (b.genre === g) b.genre = name; });
+      state.books.forEach(b => { b.genres = b.genres.map(x => x === g ? name : x); });
       if (currentGenre === g) currentGenre = name;
       saveState();
       renderGenreList();
@@ -1119,11 +1348,11 @@ function renderGenreList() {
     del.textContent = "削除";
     del.onclick = () => {
       const msg = count > 0
-        ? `ジャンル「${g}」を削除しますか？\n(${count}冊の本は「ジャンルなし」になります)`
+        ? `ジャンル「${g}」を削除しますか？\n(${count}冊の本からこのジャンルが外れます。本は削除されません)`
         : `ジャンル「${g}」を削除しますか？`;
       if (!confirm(msg)) return;
       state.genres = state.genres.filter(x => x !== g);
-      state.books.forEach(b => { if (b.genre === g) b.genre = ""; });
+      state.books.forEach(b => { b.genres = b.genres.filter(x => x !== g); });
       if (currentGenre === g) currentGenre = "all";
       saveState();
       renderGenreList();
@@ -1295,7 +1524,7 @@ function parseImportJson(text) {
     throw new Error("形式が違います");
   }
   if (!Array.isArray(d.genres)) d.genres = [];
-  d.books.forEach(b => { if (!b.list) b.list = "owned"; });
+  d.books.forEach(normalizeBook);
   return d;
 }
 
@@ -1473,10 +1702,6 @@ document.getElementById("genreFilter").onchange = (e) => {
 };
 
 // 登録確認画面のジャンルで「＋新規」を選んだ場合
-document.getElementById("confirmGenre").onchange = (e) => {
-  resolveGenreChoice(e.target, "");
-};
-
 // 連続登録モードの切替(ONのとき登録先の置き場所を表示。検討中リストでは不要)
 document.getElementById("contMode").onchange = (e) => {
   document.getElementById("contLocation").hidden = !e.target.checked || currentList === "wish";
@@ -1543,6 +1768,8 @@ window.bookshelf = {
   getState: () => state,
   // 受け取った変更を保存して画面に反映する(自分の編集としては扱わない)
   commitRemoteChanges() {
+    // 古い版のアプリが送った本(ジャンルが1つの形式など)も今の形式にそろえる
+    state.books.forEach(normalizeBook);
     saveStateFromSync();
     refreshAfterSync();
   },
@@ -1567,3 +1794,5 @@ function refreshAfterSync() {
 }
 
 render();
+// 起動直後の同期の受信を待ってから、定価のない本に定価を補う
+setTimeout(backfillPrices, 3000);

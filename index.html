@@ -54,6 +54,9 @@
   <select id="genreFilter" title="ジャンルで絞り込み"></select>
 </div>
 
+<!-- 検討中リストのカート(合計金額の目安) -->
+<div class="cart-bar" id="cartBar" hidden></div>
+
 <!-- 本の一覧（表紙グリッド） -->
 <main class="book-grid" id="bookGrid"></main>
 <div class="empty-state" id="emptyState" hidden>
@@ -110,9 +113,8 @@
     <label class="field-label" id="confirmLocationLabel">置き場所
       <select id="confirmLocation"></select>
     </label>
-    <label class="field-label">ジャンル
-      <select id="confirmGenre"></select>
-    </label>
+    <div class="field-label">ジャンル（3つまで選べます）</div>
+    <div class="genre-chips" id="confirmGenres"></div>
     <div class="btn-row">
       <button class="btn secondary" data-close="confirmModal">やめる</button>
       <button class="btn primary" id="confirmAddBtn">登録する</button>

@@ -401,7 +401,9 @@ function mergeRemoteMeta(s, r) {
   // この端末の本が使っている名前は、クラウド側に無くても消さずに残す
   const remoteLocations = r.locations && r.locations.length ? r.locations : s.locations;
   const locations = withUsedNames(remoteLocations, s.books.map(b => b.location));
-  const genres = withUsedNames(r.genres || [], s.books.map(b => b.genre));
+  // ジャンルは1冊に最大3つ(古い版のアプリから届いた本は genre が1つだけ)
+  const usedGenres = s.books.flatMap(b => Array.isArray(b.genres) ? b.genres : (b.genre ? [b.genre] : []));
+  const genres = withUsedNames(r.genres || [], usedGenres);
   const before = fingerprint([s.locations, s.genres, s.metaUpdatedAt || 0]);
   s.locations = locations;
   s.genres = genres;
