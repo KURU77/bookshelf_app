@@ -158,9 +158,19 @@ function renderCartBar() {
       <span class="cart-total">合計 ${yen(total)}</span>
     </div>
     <p class="cart-note">定価（税込）の合計です。送料やポイントは含みません。${unknown ? `価格が分からない${unknown}冊は合計に入っていません。` : ""}</p>
-    <button class="cart-filter-btn" id="cartFilterBtn">${cartOnly ? "検討中の本をすべて表示" : "カートの本だけ表示"}</button>
+    <div class="cart-actions">
+      <button class="cart-filter-btn" id="cartFilterBtn">${cartOnly ? "検討中の本をすべて表示" : "カートの本だけ表示"}</button>
+      <button class="cart-clear-btn" id="cartClearBtn">カートを空にする</button>
+    </div>
   `;
   document.getElementById("cartFilterBtn").onclick = () => { cartOnly = !cartOnly; render(); };
+  document.getElementById("cartClearBtn").onclick = () => {
+    if (!confirm(`カートの${inCart.length}冊をすべてカートから外しますか？\n（本は検討中リストに残ります）`)) return;
+    inCart.forEach(b => { delete b.inCart; });
+    cartOnly = false;
+    saveState();
+    render();
+  };
 }
 
 function renderListSwitch() {
@@ -416,7 +426,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)

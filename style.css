@@ -619,8 +619,16 @@ body {
 .cart-total { font-size: 1.15rem; font-weight: bold; color: var(--accent); }
 .cart-note, .cart-empty { font-size: .74rem; color: var(--muted); line-height: 1.6; margin-top: 4px; }
 .cart-empty { margin-top: 0; }
+.cart-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
+.cart-clear-btn {
+  border: none;
+  background: none;
+  color: var(--danger);
+  font-size: .78rem;
+  padding: 6px 4px;
+  cursor: pointer;
+}
 .cart-filter-btn {
-  margin-top: 8px;
   border: none;
   background: #f6e7d8;
   color: #8a4b12;
