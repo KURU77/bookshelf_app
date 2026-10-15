@@ -701,6 +701,55 @@ body {
 .shop-link.rakuten { background: #bf0000; }
 .shop-note { font-size: .72rem; color: var(--muted); line-height: 1.6; margin-top: 6px; }
 
+/* ---------- Kindle Unlimited ---------- */
+.ku-search-btn {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  font-size: .85rem;
+  font-weight: bold;
+  padding: 11px;
+  border-radius: 10px;
+  background: #146eb4;
+  color: #fff;
+}
+.ku-hint { font-size: .72rem; color: var(--muted); line-height: 1.6; margin: 6px 0 8px; }
+.ku-record { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ku-chip {
+  border: 1.5px solid #d8d2c2;
+  background: #fff;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: .82rem;
+  cursor: pointer;
+}
+.ku-chip.yes.on { border-color: #146eb4; background: #146eb4; color: #fff; }
+.ku-chip.no.on { border-color: var(--muted); background: var(--muted); color: #fff; }
+.ku-date { font-size: .72rem; color: var(--muted); margin-left: auto; }
+.ku-mark {
+  position: absolute;
+  top: 30px;
+  left: 6px;
+  font-size: .6rem;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #fff;
+  background: #146eb4;
+}
+.ku-filter-btn {
+  border: 1.5px solid #146eb4;
+  background: transparent;
+  color: #146eb4;
+  border-radius: 8px;
+  padding: 4px 9px;
+  font-size: .75rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+.ku-filter-btn.active { background: #146eb4; color: #fff; }
+
 /* ---------- メモ ---------- */
 .memo-hint { font-size: .7rem; font-weight: normal; color: var(--muted); margin-left: 6px; }
 .memo-input {

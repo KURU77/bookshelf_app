@@ -14,6 +14,7 @@ let currentLocation = "all";   // "all" または置き場所名
 let currentFilter = "all";     // all / unread / reading / done
 let currentGenre = "all";      // "all" / "none"(未分類) / ジャンル名
 let searchQuery = "";          // フリーワード検索(書名・著者)
+let kuOnly = false;            // Kindle Unlimitedで読めると記録した本だけを表示する
 let pendingBook = null;        // 登録確認中の本
 let pendingList = "owned";     // 登録確認中の登録先リスト
 let pendingGenres = [];        // 登録確認中に選んだジャンル
@@ -295,6 +296,7 @@ function visibleBooks() {
     if (currentGenre === "none") { if (b.genres.length) return false; }
     else if (currentGenre !== "all" && !b.genres.includes(currentGenre)) return false;
     if (q && !`${b.title} ${b.author} ${b.memo || ""}`.toLowerCase().includes(q)) return false;
+    if (kuOnly && !(b.ku && b.ku.status === "yes")) return false;
     return true;
   });
 }
@@ -347,6 +349,7 @@ function renderGrid() {
       ${coverHtml}
       ${badgeHtml}
       ${b.memo ? `<span class="memo-mark" title="メモあり">📝</span>` : ""}
+      ${b.ku && b.ku.status === "yes" ? `<span class="ku-mark" title="Kindle Unlimitedで読める">KU</span>` : ""}
       ${progressHtml}
       <div class="book-title">${escapeHtml(b.title)}</div>
       ${priceHtml}
@@ -483,7 +486,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.4";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -1234,6 +1237,23 @@ function renderDetail() {
     <p class="shop-note">国内の新品の本は定価で販売されるため、どのお店でも本の値段はほぼ同じです（送料やポイントはお店ごとに異なります）。</p>
   `;
 
+  // Kindle Unlimited: 対象かどうかを自動で判定する公式の手段が無いため、
+  // 読み放題対象だけに絞ったAmazon検索を開き、確かめた結果をここに記録する
+  const ku = b.ku && b.ku.status;
+  const kuHtml = `
+    <div class="section-title">📖 Kindle Unlimited</div>
+    <a class="ku-search-btn" href="${escapeHtml(kuSearchUrl(b))}" target="_blank" rel="noopener">Kindle Unlimitedの読み放題で探す</a>
+    <p class="ku-hint">Amazonの読み放題の対象作品だけから、この本を探します。<br>
+      <strong>この本が「Kindle Unlimited」の表示つきで出てくれば読み放題の対象</strong>です。
+      「結果は見つかりませんでした」と出て他の商品が並ぶ場合や、別の本しか出ない場合は対象外です。
+      確かめた結果を下で記録しておけます（対象作品は毎月入れ替わります）。</p>
+    <div class="ku-record">
+      <button class="ku-chip yes ${ku === "yes" ? "on" : ""}" data-ku="yes">✓ 読める</button>
+      <button class="ku-chip no ${ku === "no" ? "on" : ""}" data-ku="no">読めない</button>
+      <span class="ku-date">${ku ? `確認日 ${formatDate(b.ku.at)}` : "未確認"}</span>
+    </div>
+  `;
+
   if (isWish) {
     // 検討中の本: 読書記録の代わりに、カート・お店へのリンク・「蔵書に移す」を表示
     body.innerHTML = `
@@ -1242,6 +1262,7 @@ function renderDetail() {
         ${b.inCart ? "✓ カートに入っています（外す）" : "🛒 カートに入れる"}
       </button>
       ${shopHtml}
+      ${kuHtml}
       ${genreHtml}
       ${memoHtml}
 
@@ -1283,6 +1304,7 @@ function renderDetail() {
       </div>
       ${logsHtml}
       ${shopHtml}
+      ${kuHtml}
 
       <div class="btn-row" style="margin-top:20px">
         <button class="btn secondary" id="moveToWishBtn">🛒 検討中へ移す</button>
@@ -1334,6 +1356,19 @@ function renderDetail() {
       }
     };
   }
+
+  // Kindle Unlimitedで読めるかの記録(同じボタンをもう一度押すと「未確認」に戻る)
+  body.querySelectorAll(".ku-chip").forEach(btn => {
+    btn.onclick = () => {
+      const cur = state.books.find(x => x.isbn === b.isbn);
+      if (!cur) return;
+      if (cur.ku && cur.ku.status === btn.dataset.ku) delete cur.ku;
+      else cur.ku = { status: btn.dataset.ku, at: Date.now() };
+      saveState();
+      render();
+      renderDetail();
+    };
+  });
 
   // ジャンル(最大3つ)
   renderGenreChips(body.querySelector("#detailGenres"), b.genres, (next) => {
@@ -1485,6 +1520,20 @@ function renderGenreChips(container, selected, onChange) {
     else renderGenreChips(container, selected, onChange);
   };
   container.appendChild(add);
+}
+
+/* ---------- Kindle Unlimited ---------- */
+/* Amazonの「Kindleストア」で「読み放題対象タイトル」だけに絞った検索。
+   (Amazonの検索画面の絞り込みと同じ条件) */
+const KU_FILTER = "n:2250738051,p_n_feature_nineteen_browse-bin:3169286051";
+
+function kuSearchUrl(b) {
+  return `https://www.amazon.co.jp/s?k=${encodeURIComponent(b.title)}&i=digital-text&rh=${encodeURIComponent(KU_FILTER)}`;
+}
+
+function formatDate(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 /* ---------- ネットショップへのリンク ---------- */
@@ -1818,6 +1867,11 @@ function hasValidCheckDigit(input) {
    ============================================================ */
 document.getElementById("scanFab").onclick = openScanner;
 document.getElementById("cartFab").onclick = openCart;
+document.getElementById("kuFilterBtn").onclick = () => {
+  kuOnly = !kuOnly;
+  document.getElementById("kuFilterBtn").classList.toggle("active", kuOnly);
+  render();
+};
 document.getElementById("confirmAddBtn").onclick = addPendingBook;
 document.getElementById("manageLocBtn").onclick = () => { renderLocList(); renderGenreList(); showModal("locModal"); };
 
