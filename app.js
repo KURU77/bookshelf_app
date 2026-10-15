@@ -486,7 +486,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "3.4";
+const APP_VERSION = "3.5";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -980,7 +980,7 @@ async function fetchOpenLibrary(isbn) {
 /* 4つの検索先に同時に問い合わせ(待ち時間は一番遅いものだけで済む)、
    openBD(出版社の情報) → 国会図書館 → Google Books → Open Library(洋書) の優先順で
    項目ごとに組み合わせる。表紙・ページ数・定価など足りない項目は後ろの検索先で補う */
-async function fetchBookInfo(isbn) {
+async function fetchBookInfo(isbn, opts = {}) {
   // 雑誌(491コード)は号ごとの書誌データベースが存在しないため手入力登録にする
   if (isMagazineCode(isbn)) return null;
   const others = [fetchNdl(isbn).catch(() => null), fetchGoogleBooks(isbn), fetchOpenLibrary(isbn)];
@@ -1008,7 +1008,8 @@ async function fetchBookInfo(isbn) {
     title: merged.title || "(タイトル不明)",
     author: merged.author,
     publisher: merged.publisher,
-    cover: await resolveCover(isbn, merged.cover),
+    // 表紙画像の確認には時間がかかるため、不要なとき(既に表紙がある本の更新)は省く
+    cover: opts.cover === false ? merged.cover : await resolveCover(isbn, merged.cover),
     totalPages: merged.totalPages,
     price: merged.price
   };
@@ -1522,6 +1523,165 @@ function renderGenreChips(container, selected, onChange) {
   container.appendChild(add);
 }
 
+/* ============================================================
+   登録済みの本の情報をまとめて更新
+   (以前の版で登録して書名が分からなかった本や、欠けている項目を調べ直す)
+   ============================================================ */
+const PLACEHOLDER_TITLE = /^(ISBN|雑誌コード) \d+$/;   // 書名が分からず仮の名前で登録した本
+let refreshRun = null;   // 実行中・直前の更新の進み具合
+
+function missingInfo(b) {
+  return {
+    title: PLACEHOLDER_TITLE.test(b.title),
+    cover: !b.cover,
+    price: !(b.price && b.price.total),
+    other: !b.author || !b.publisher || !b.totalPages
+  };
+}
+
+/* 調べ直す対象(ISBNの本で、どこかに空欄がある本。雑誌は書誌データが無いので除く) */
+function refreshTargets() {
+  return state.books.filter(b => {
+    if (!/^97[89]\d{10}$/.test(b.isbn)) return false;
+    const m = missingInfo(b);
+    return m.title || m.cover || m.price || m.other;
+  });
+}
+
+function openRefresh() {
+  kuCheckIsbns = null;   // 開くたびに、今の未確認の本を集め直す
+  renderRefreshModal();
+  showModal("refreshModal");
+}
+
+function renderRefreshModal() {
+  const targets = refreshTargets();
+  const count = (key) => targets.filter(b => missingInfo(b)[key]).length;
+  const running = refreshRun && refreshRun.running;
+  document.getElementById("refreshCount").textContent = targets.length
+    ? `調べ直す本: ${targets.length}冊（書名が分からない本 ${count("title")}冊・表紙なし ${count("cover")}冊・定価なし ${count("price")}冊・著者などが欠けている本 ${count("other")}冊）`
+    : "欠けている情報のある本はありません。";
+  const runBtn = document.getElementById("refreshRunBtn");
+  runBtn.disabled = running || !targets.length;
+  runBtn.textContent = running ? "更新中…" : "まとめて更新する";
+  document.getElementById("refreshProgress").hidden = !running;
+  updateRefreshProgress();
+  renderRefreshResult();
+  renderKuChecklist();
+}
+
+function updateRefreshProgress() {
+  if (!refreshRun) return;
+  const pct = refreshRun.total ? Math.round(refreshRun.done / refreshRun.total * 100) : 100;
+  document.getElementById("refreshBar").style.width = pct + "%";
+  document.getElementById("refreshProgressText").textContent =
+    `${refreshRun.done} / ${refreshRun.total} 冊を確認しました（国立国会図書館などに問い合わせ中）`;
+}
+
+function renderRefreshResult() {
+  const box = document.getElementById("refreshResult");
+  if (!refreshRun || refreshRun.running) { box.hidden = true; return; }
+  const f = refreshRun.filled;
+  const parts = [["書名", f.title], ["著者", f.author], ["出版社", f.publisher], ["表紙", f.cover], ["ページ数", f.pages], ["定価", f.price]]
+    .filter(([, n]) => n).map(([label, n]) => `${label} ${n}冊`);
+  const untitled = state.books.filter(b => PLACEHOLDER_TITLE.test(b.title));
+  const unknownBooks = untitled.filter(b => !isMagazineCode(b.isbn)).length;
+  const unknownMags = untitled.length - unknownBooks;
+  box.hidden = false;
+  box.innerHTML = `
+    <p><strong>更新が終わりました。</strong>${parts.length ? `埋まった項目: ${parts.join("・")}` : "新しく分かった情報はありませんでした。"}</p>
+    ${unknownBooks ? `<p class="refresh-unknown">まだ書名が分からない本が${unknownBooks}冊あります。どのデータベースにも登録されていないため、本の詳細の「✎ 情報を編集」から書名を入力してください。</p>` : ""}
+    ${unknownMags ? `<p class="refresh-unknown">誌名が未入力の雑誌が${unknownMags}冊あります。雑誌は誌名を自動で調べられないため、「✎ 情報を編集」から入力してください。</p>` : ""}
+  `;
+}
+
+async function runRefresh() {
+  if (refreshRun && refreshRun.running) return;
+  const targets = refreshTargets().map(b => b.isbn);
+  refreshRun = {
+    running: true, done: 0, total: targets.length,
+    filled: { title: 0, author: 0, publisher: 0, cover: 0, pages: 0, price: 0 }
+  };
+  renderRefreshModal();
+
+  // 3冊ずつ同時に調べる。途中で閉じても無駄にならないよう、5冊ごとに保存する
+  let next = 0;
+  const worker = async () => {
+    while (next < targets.length) {
+      const isbn = targets[next++];
+      try { await refreshOne(isbn); } catch (e) { /* 1冊の失敗で止めない */ }
+      refreshRun.done++;
+      if (refreshRun.done % 5 === 0) { saveState(); render(); }
+      updateRefreshProgress();
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  refreshRun.running = false;
+  saveState();
+  render();
+  if (!document.getElementById("refreshModal").hidden) renderRefreshModal();
+}
+
+/* 1冊を調べ直し、空欄だけを埋める(手で入力した書名・定価などは書き換えない) */
+async function refreshOne(isbn) {
+  const before = state.books.find(b => b.isbn === isbn);
+  if (!before) return;
+  const info = await fetchBookInfo(isbn, { cover: !before.cover });
+  // 調べている間に同期などで差し替わっていても、今の本に書き込む
+  const cur = state.books.find(b => b.isbn === isbn);
+  if (!info || !cur) return;
+  const f = refreshRun.filled;
+  if (PLACEHOLDER_TITLE.test(cur.title) && info.title && info.title !== "(タイトル不明)") { cur.title = info.title; f.title++; }
+  if (!cur.author && info.author) { cur.author = info.author; f.author++; }
+  if (!cur.publisher && info.publisher) { cur.publisher = info.publisher; f.publisher++; }
+  if (!cur.cover && info.cover) { cur.cover = info.cover; f.cover++; }
+  if (!cur.totalPages && info.totalPages) { cur.totalPages = info.totalPages; f.pages++; }
+  if (!(cur.price && cur.price.total) && info.price) { cur.price = info.price; f.price++; }
+}
+
+/* ---------- Kindle Unlimited の確認一覧 ---------- */
+let kuCheckIsbns = null;   // 一覧を開いた時点の未確認の本(記録しても行が消えて並びがずれないように固定する)
+
+function renderKuChecklist() {
+  const list = document.getElementById("kuCheckList");
+  if (!kuCheckIsbns) {
+    // 検討中の本(買う前にKUで読めるか知りたい本)を先に並べる
+    kuCheckIsbns = state.books.filter(b => !b.ku)
+      .sort((a, b) => (a.list === "wish" ? 0 : 1) - (b.list === "wish" ? 0 : 1))
+      .map(b => b.isbn);
+  }
+  const books = kuCheckIsbns.map(isbn => state.books.find(b => b.isbn === isbn)).filter(Boolean);
+  const remaining = books.filter(b => !b.ku).length;
+  document.getElementById("kuCount").textContent = books.length
+    ? `未確認: ${remaining}冊（この一覧の${books.length}冊中）`
+    : "すべての本を確認済みです。";
+  list.innerHTML = books.map(b => {
+    const st = b.ku && b.ku.status;
+    return `
+      <li class="ku-check-item ${st ? "done" : ""}" data-isbn="${b.isbn}">
+        <div class="ku-check-title">${b.list === "wish" ? `<span class="ku-check-wish">検討中</span>` : ""}${escapeHtml(b.title)}</div>
+        <div class="ku-check-actions">
+          <a class="ku-check-search" href="${escapeHtml(kuSearchUrl(b))}" target="_blank" rel="noopener">探す</a>
+          <button class="ku-chip yes ${st === "yes" ? "on" : ""}" data-ku="yes">✓ 読める</button>
+          <button class="ku-chip no ${st === "no" ? "on" : ""}" data-ku="no">読めない</button>
+        </div>
+      </li>`;
+  }).join("");
+  list.querySelectorAll(".ku-check-item").forEach(li => {
+    li.querySelectorAll(".ku-chip").forEach(btn => {
+      btn.onclick = () => {
+        const cur = state.books.find(b => b.isbn === li.dataset.isbn);
+        if (!cur) return;
+        if (cur.ku && cur.ku.status === btn.dataset.ku) delete cur.ku;
+        else cur.ku = { status: btn.dataset.ku, at: Date.now() };
+        saveState();
+        render();
+        renderKuChecklist();
+      };
+    });
+  });
+}
+
 /* ---------- Kindle Unlimited ---------- */
 /* Amazonの「Kindleストア」で「読み放題対象タイトル」だけに絞った検索。
    (Amazonの検索画面の絞り込みと同じ条件) */
@@ -1867,6 +2027,8 @@ function hasValidCheckDigit(input) {
    ============================================================ */
 document.getElementById("scanFab").onclick = openScanner;
 document.getElementById("cartFab").onclick = openCart;
+document.getElementById("refreshBtn").onclick = openRefresh;
+document.getElementById("refreshRunBtn").onclick = runRefresh;
 document.getElementById("kuFilterBtn").onclick = () => {
   kuOnly = !kuOnly;
   document.getElementById("kuFilterBtn").classList.toggle("active", kuOnly);
@@ -2060,6 +2222,7 @@ window.bookshelf = {
 function refreshAfterSync() {
   render();
   if (!document.getElementById("cartModal").hidden) renderCartModal();
+  if (!document.getElementById("refreshModal").hidden) renderRefreshModal();
   const modal = document.getElementById("detailModal");
   if (modal.hidden) return;
   // ページ数などを入力している最中は、書きかけが消えないよう詳細画面を描き直さない

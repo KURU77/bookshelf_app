@@ -46,6 +46,17 @@ body {
 .header-right { display: flex; align-items: center; gap: 8px; }
 .header-stats { font-size: .8rem; opacity: .9; }
 .sync-badge { font-size: .9rem; line-height: 1; }
+.refresh-btn {
+  border: 1px solid rgba(255,255,255,.55);
+  background: transparent;
+  color: #fff;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: .72rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.refresh-btn:active { background: rgba(255,255,255,.15); }
 
 /* ---------- 蔵書/検討中リスト切り替え ---------- */
 .list-switch {
@@ -700,6 +711,44 @@ body {
 .shop-link.yahoo { background: #ff0033; }
 .shop-link.rakuten { background: #bf0000; }
 .shop-note { font-size: .72rem; color: var(--muted); line-height: 1.6; margin-top: 6px; }
+
+/* ---------- 本の情報をまとめて更新 ---------- */
+.refresh-count { font-size: .8rem; color: var(--green-dark); line-height: 1.6; margin-bottom: 10px; }
+.refresh-progress { margin-top: 10px; }
+.refresh-result {
+  margin-top: 10px;
+  font-size: .8rem;
+  line-height: 1.7;
+  background: #eef4f1;
+  color: var(--green-dark);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.refresh-unknown { color: var(--accent); margin-top: 4px; }
+.ku-check-list { list-style: none; }
+.ku-check-item { padding: 10px 2px; border-bottom: 1px solid #ece6d8; }
+.ku-check-item.done .ku-check-title { color: var(--muted); }
+.ku-check-title { font-size: .85rem; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ku-check-wish {
+  font-size: .62rem;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.ku-check-actions { display: flex; align-items: center; gap: 6px; }
+.ku-check-search {
+  text-decoration: none;
+  font-size: .8rem;
+  font-weight: bold;
+  color: #fff;
+  background: #146eb4;
+  border-radius: 999px;
+  padding: 6px 14px;
+  margin-right: auto;
+}
 
 /* ---------- Kindle Unlimited ---------- */
 .ku-search-btn {
