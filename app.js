@@ -486,7 +486,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "3.5";
+const APP_VERSION = "3.6";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -1244,10 +1244,15 @@ function renderDetail() {
   const kuHtml = `
     <div class="section-title">📖 Kindle Unlimited</div>
     <a class="ku-search-btn" href="${escapeHtml(kuSearchUrl(b))}" target="_blank" rel="noopener">Kindle Unlimitedの読み放題で探す</a>
-    <p class="ku-hint">Amazonの読み放題の対象作品だけから、この本を探します。<br>
-      <strong>この本が「Kindle Unlimited」の表示つきで出てくれば読み放題の対象</strong>です。
-      「結果は見つかりませんでした」と出て他の商品が並ぶ場合や、別の本しか出ない場合は対象外です。
-      確かめた結果を下で記録しておけます（対象作品は毎月入れ替わります）。</p>
+    ${canSearchKuByIsbn(b) ? `
+    <p class="ku-hint">ISBNで、Amazonの読み放題の対象作品からこの本だけを探します。<br>
+      <strong>この本が「Kindle Unlimited」の表示つきで出れば読み放題の対象</strong>です。
+      「Kindleストアに…の結果は見つかりませんでした」と出たら対象外です（その下に紙の本が表示されても、読み放題ではありません）。
+      まれにKindle版がISBNで見つからない本もあるので、気になるときは
+      <a href="${escapeHtml(kuSearchUrl(b, "title"))}" target="_blank" rel="noopener">書名で探す</a>でも確かめてください。</p>` : `
+    <p class="ku-hint">書名で、Amazonの読み放題の対象作品から探します。この本が「Kindle Unlimited」の表示つきで出れば対象です。
+      「結果は見つかりませんでした」と出たり、別の本しか出なかったりする場合は対象外です。</p>`}
+    <p class="ku-hint">確かめた結果を下で記録しておけます（対象作品は毎月入れ替わります）。</p>
     <div class="ku-record">
       <button class="ku-chip yes ${ku === "yes" ? "on" : ""}" data-ku="yes">✓ 読める</button>
       <button class="ku-chip no ${ku === "no" ? "on" : ""}" data-ku="no">読めない</button>
@@ -1659,7 +1664,8 @@ function renderKuChecklist() {
     const st = b.ku && b.ku.status;
     return `
       <li class="ku-check-item ${st ? "done" : ""}" data-isbn="${b.isbn}">
-        <div class="ku-check-title">${b.list === "wish" ? `<span class="ku-check-wish">検討中</span>` : ""}${escapeHtml(b.title)}</div>
+        <div class="ku-check-title">${b.list === "wish" ? `<span class="ku-check-wish">検討中</span>` : ""}${escapeHtml(b.title)}
+          ${canSearchKuByIsbn(b) ? `<a class="ku-check-bytitle" href="${escapeHtml(kuSearchUrl(b, "title"))}" target="_blank" rel="noopener">書名で探す</a>` : ""}</div>
         <div class="ku-check-actions">
           <a class="ku-check-search" href="${escapeHtml(kuSearchUrl(b))}" target="_blank" rel="noopener">探す</a>
           <button class="ku-chip yes ${st === "yes" ? "on" : ""}" data-ku="yes">✓ 読める</button>
@@ -1687,8 +1693,16 @@ function renderKuChecklist() {
    (Amazonの検索画面の絞り込みと同じ条件) */
 const KU_FILTER = "n:2250738051,p_n_feature_nineteen_browse-bin:3169286051";
 
-function kuSearchUrl(b) {
-  return `https://www.amazon.co.jp/s?k=${encodeURIComponent(b.title)}&i=digital-text&rh=${encodeURIComponent(KU_FILTER)}`;
+/* ISBNで探すと、Amazonが紙の本と結び付けているKindle版だけがぴったり出る
+   (対象外なら「結果は見つかりませんでした」と出る)。書名で探すと似た本が大量に出るため、
+   ISBNのある本はISBNで探し、書名での検索は念のための確認用に残す */
+function kuSearchUrl(b, by = "isbn") {
+  const key = by === "isbn" && /^97[89]\d{10}$/.test(b.isbn) ? b.isbn : b.title;
+  return `https://www.amazon.co.jp/s?k=${encodeURIComponent(key)}&i=digital-text&rh=${encodeURIComponent(KU_FILTER)}`;
+}
+
+function canSearchKuByIsbn(b) {
+  return /^97[89]\d{10}$/.test(b.isbn);
 }
 
 function formatDate(ms) {

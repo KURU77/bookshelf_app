@@ -729,6 +729,8 @@ body {
 .ku-check-item { padding: 10px 2px; border-bottom: 1px solid #ece6d8; }
 .ku-check-item.done .ku-check-title { color: var(--muted); }
 .ku-check-title { font-size: .85rem; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ku-check-bytitle { font-size: .7rem; color: #146eb4; margin-left: 6px; }
+.ku-hint a { color: #146eb4; }
 .ku-check-wish {
   font-size: .62rem;
   color: #fff;
