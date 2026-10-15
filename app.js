@@ -134,6 +134,23 @@ function priceText(b) {
   return `${yen(b.price.total)}（税込）${base}`;
 }
 
+/* 古い時点の価格か(国会図書館に古い版の価格しか記録されていない本) */
+function isOldPrice(p) {
+  return !!(p && p.source === "ndl" && p.asOf && p.asOf < new Date().getFullYear() - 1);
+}
+
+/* 価格の出どころの説明(出版社の情報なら空) */
+function priceSourceNote(p) {
+  if (!p) return "";
+  if (p.source === "manual") return "手入力した価格です。";
+  if (p.source === "ndl") {
+    return isOldPrice(p)
+      ? `国立国会図書館に記録された${p.asOf}年時点の価格です。現在の価格とは違う場合があります。`
+      : "国立国会図書館の情報による価格です。";
+  }
+  return "";
+}
+
 /* ---------- カート(検討中の本の合計金額の目安) ---------- */
 function cartBooks() {
   return state.books.filter(b => b.list === "wish" && b.inCart);
@@ -163,12 +180,13 @@ function renderCartModal() {
   const priced = items.filter(b => b.price && b.price.total);
   const total = priced.reduce((sum, b) => sum + b.price.total, 0);
   const unknown = items.length - priced.length;
+  const old = priced.filter(b => isOldPrice(b.price)).length;
   body.innerHTML = `
     <div class="cart-summary">
       <span class="cart-title">${items.length}冊</span>
       <span class="cart-total">合計 ${yen(total)}</span>
     </div>
-    <p class="cart-note">定価（税込）の合計です。送料やポイントは含みません。${unknown ? `価格が分からない${unknown}冊は合計に入っていません。` : ""}</p>
+    <p class="cart-note">定価（税込）の合計です。送料やポイントは含みません。${unknown ? `価格が分からない${unknown}冊は合計に入っていません。` : ""}${old ? `古い時点の価格しか分からない本が${old}冊含まれているため、実際とは違う場合があります。` : ""}</p>
     <ul class="cart-list">
       ${items.map(b => `
         <li class="cart-item" data-isbn="${b.isbn}">
@@ -177,7 +195,9 @@ function renderCartModal() {
             : `<div class="cart-thumb placeholder"></div>`}
           <div class="cart-info">
             <div class="cart-item-title">${escapeHtml(b.title)}</div>
-            <div class="cart-item-price">${b.price && b.price.total ? yen(b.price.total) : "価格不明"}</div>
+            <div class="cart-item-price">${b.price && b.price.total
+              ? yen(b.price.total) + (isOldPrice(b.price) ? `<span class="cart-old">（${b.price.asOf}年時点）</span>` : "")
+              : "価格不明"}</div>
           </div>
           <button class="cart-remove" data-remove="${b.isbn}">外す</button>
         </li>`).join("")}
@@ -463,7 +483,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "3.2";
+const APP_VERSION = "3.3";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -668,6 +688,7 @@ async function onScanned(isbn) {
   });
   saveState();
   render();
+  if (!info.price) setTimeout(backfillPrices, 500);
   if (notFound) {
     showScanToast(isMagazineCode(isbn)
       ? "雑誌を登録しました。詳細画面の「✎情報を編集」で誌名を入力できます"
@@ -678,11 +699,20 @@ async function onScanned(isbn) {
 }
 
 /* ============================================================
-   書誌情報の取得 (openBD → Google Books)
+   書誌情報の取得 (openBD・国立国会図書館・Google Books・Open Library)
    ============================================================ */
+// 応答が遅い検索先を待ち続けないための上限(ふだんは1〜3秒で返る。まれに30秒以上止まる)
+const LOOKUP_TIMEOUT_MS = 7000;
+
+function fetchWithTimeout(url, ms = LOOKUP_TIMEOUT_MS) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
 async function fetchOpenBd(isbn) {
   try {
-    const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${isbn}`);
+    const res = await fetchWithTimeout(`https://api.openbd.jp/v1/get?isbn=${isbn}`);
     const data = await res.json();
     if (!data || !data[0]) return null;
     const s = data[0].summary || {};
@@ -719,60 +749,163 @@ function priceFromOpenBd(item) {
   }
 }
 
-/* 複数の本の定価をまとめて取得する。
+/* 国立国会図書館サーチ。国内で出版された本は国会図書館への納本が法律で
+   義務づけられているため、openBDに無い本(出版社が情報を登録していない本)も見つかる。
+   見つからなければ null、通信に失敗したら例外を投げる */
+async function fetchNdl(isbn) {
+  const url = `https://ndlsearch.ndl.go.jp/api/opensearch?isbn=${isbn}&cnt=20`;
+  let text;
+  // 国会図書館はときどき応答が遅れたり一時的に失敗したりするので、1回だけやり直す
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) throw new Error("NDL " + res.status);
+      text = await res.text();
+      break;
+    } catch (e) {
+      if (attempt >= 2) throw e;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  const xml = new DOMParser().parseFromString(text, "text/xml");
+  const values = (el, tag) => [...el.getElementsByTagName(tag)]
+    .map(n => n.textContent.normalize("NFKC").trim()).filter(Boolean);
+  // 問い合わせたISBNが識別子に入っている記録だけが、この本そのもの
+  // (点字版・CD-ROMなどの関連資料は識別子にISBNを持たないので除かれる)
+  const own = [...xml.getElementsByTagName("item")]
+    .filter(it => values(it, "dc:identifier").some(id => normalizeIsbn(id) === isbn));
+  if (!own.length) return null;
+
+  // 情報が多くそろっている「図書」の記録を代表にする
+  const score = (it) => (values(it, "category").some(c => c.includes("図書")) ? 8 : 0)
+    + (values(it, "dcndl:price").length ? 4 : 0)
+    + (values(it, "dc:extent").length ? 2 : 0)
+    + (values(it, "dc:creator").length ? 1 : 0);
+  const best = own.slice().sort((a, b) => score(b) - score(a))[0];
+  const year = (it) => parseInt((values(it, "dcterms:issued")[0] || "").match(/\d{4}/), 10) || null;
+
+  // 価格は、価格が記録されている中でいちばん新しい版のものを使う
+  const priced = own.filter(it => values(it, "dcndl:price").length)
+    .sort((a, b) => (year(b) || 0) - (year(a) || 0))[0];
+
+  const pagesText = values(best, "dc:extent")[0] || "";
+  const pages = parseInt((pagesText.match(/(\d+)\s*p/) || [])[1], 10) || null;
+  return {
+    title: (values(best, "dc:title")[0] || "").split(" : ")[0],
+    author: values(best, "dc:creator").map(cleanNdlName).join("、"),
+    publisher: values(best, "dc:publisher")[0] || "",
+    cover: "",
+    totalPages: pages,
+    price: priced ? priceFromNdl(values(priced, "dcndl:price")[0], year(priced)) : null
+  };
+}
+
+/* 「村田, 沙耶香, 1979-」→「村田沙耶香」。外国人名(Dick, Philip K.)はそのまま */
+function cleanNdlName(name) {
+  const n = name.replace(/,\s*\d{4}-(\d{4})?$/, "").trim();
+  return /[぀-ヿ一-鿿]/.test(n) ? n.replace(/,\s*/g, "") : n;
+}
+
+/* 国会図書館の価格(「2600円」「６４０円」など)。本体価格(税抜)で記録されている。
+   古い版の価格しか無い本もあるので、何年時点の価格かも持つ */
+function priceFromNdl(text, year) {
+  const m = (text || "").replace(/,/g, "").match(/(\d+)\s*円/);
+  const amount = m && parseInt(m[1], 10);
+  if (!amount) return null;
+  if (/税込/.test(text)) return { total: amount, source: "ndl", asOf: year };
+  return { base: amount, total: Math.floor(amount * 11 / 10), source: "ndl", asOf: year };
+}
+
+/* 複数の本の定価をまとめて取得する。openBD(まとめて問い合わせできる)を先に調べ、
+   定価が無かった本だけ国会図書館に1冊ずつ問い合わせる。
    prices: 見つかった本の定価 / checked: 問い合わせに成功した本(見つからなかった本も含む) */
 async function fetchPrices(isbns) {
   const prices = {};
   const checked = [];
+  const needNdl = [];
   for (let i = 0; i < isbns.length; i += 50) {
     const chunk = isbns.slice(i, i + 50);
     try {
-      const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${chunk.join(",")}`);
+      const res = await fetchWithTimeout(`https://api.openbd.jp/v1/get?isbn=${chunk.join(",")}`);
       const data = await res.json();
       data.forEach((item, k) => {
         const price = item && priceFromOpenBd(item);
-        if (price) prices[chunk[k]] = price;
+        if (price) {
+          prices[chunk[k]] = price;
+          checked.push(chunk[k]);
+        } else {
+          needNdl.push(chunk[k]);
+        }
       });
-      checked.push(...chunk);
+    } catch (e) { /* 通信できなかった分は次回また問い合わせる */ }
+  }
+  for (const isbn of needNdl) {
+    try {
+      const info = await fetchNdl(isbn);
+      if (info && info.price) prices[isbn] = info.price;
+      checked.push(isbn);
     } catch (e) { /* 通信できなかった分は次回また問い合わせる */ }
   }
   return { prices, checked };
 }
 
-/* 定価を持っていない登録済みの本に、出版社の定価を補う(起動後に裏で1回)。
-   見つからなかった本はこの端末に記録し、毎回問い合わせないようにする */
-const PRICE_CHECK_KEY = "my-bookshelf-pricecheck";
+/* 定価を持っていない登録済みの本に、定価を補う(起動後に裏で1回)。
+   見つからなかった本はこの端末に記録し、毎回問い合わせないようにする。
+   (v2: 国会図書館を調べ先に加えたので、以前見つからなかった本も調べ直す) */
+const PRICE_CHECK_KEY = "my-bookshelf-pricecheck-v2";
+
+let backfilling = false;
+let backfillAgain = false;
 
 async function backfillPrices() {
   if (!navigator.onLine) return;
+  // 実行中にまた呼ばれたら(連続登録など)、終わってからもう一度だけ回す
+  if (backfilling) { backfillAgain = true; return; }
+  backfilling = true;
+  try {
+    await backfillPricesOnce();
+  } finally {
+    backfilling = false;
+    if (backfillAgain) {
+      backfillAgain = false;
+      backfillPrices();
+    }
+  }
+}
+
+async function backfillPricesOnce() {
+  localStorage.removeItem("my-bookshelf-pricecheck");   // 以前の版の記録
   let done = {};
   try { done = JSON.parse(localStorage.getItem(PRICE_CHECK_KEY)) || {}; } catch (e) { /* 初回 */ }
   const targets = state.books
     .filter(b => !b.price && !done[b.isbn] && /^97[89]\d{10}$/.test(b.isbn))
     .map(b => b.isbn);
-  if (!targets.length) return;
 
-  const { prices, checked } = await fetchPrices(targets);
-  let changed = false;
-  for (const isbn of checked) {
-    done[isbn] = Date.now();
-    // 取得中に同期で差し替わっていても、今の本に書き込む
-    const cur = state.books.find(b => b.isbn === isbn);
-    if (cur && !cur.price && prices[isbn]) {
-      cur.price = prices[isbn];
-      changed = true;
+  // 国会図書館へは1冊ずつ問い合わせるため時間がかかる。途中でアプリを閉じても
+  // それまでの分が無駄にならないよう、20冊ごとに保存する
+  for (let i = 0; i < targets.length; i += 20) {
+    const { prices, checked } = await fetchPrices(targets.slice(i, i + 20));
+    let changed = false;
+    for (const isbn of checked) {
+      done[isbn] = Date.now();
+      // 取得中に同期で差し替わっていても、今の本に書き込む
+      const cur = state.books.find(b => b.isbn === isbn);
+      if (cur && !cur.price && prices[isbn]) {
+        cur.price = prices[isbn];
+        changed = true;
+      }
     }
-  }
-  localStorage.setItem(PRICE_CHECK_KEY, JSON.stringify(done));
-  if (changed) {
-    saveState();
-    render();
+    localStorage.setItem(PRICE_CHECK_KEY, JSON.stringify(done));
+    if (changed) {
+      saveState();
+      render();
+    }
   }
 }
 
 async function fetchGoogleBooks(isbn) {
   try {
-    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+    const res = await fetchWithTimeout(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
     const data = await res.json();
     if (!data.totalItems) return null;
     const v = data.items[0].volumeInfo;
@@ -827,7 +960,7 @@ async function resolveCover(isbn, apiCover) {
 /* Open Library — 洋書に強い(キー不要) */
 async function fetchOpenLibrary(isbn) {
   try {
-    const res = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+    const res = await fetchWithTimeout(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
     const data = await res.json();
     const v = data[`ISBN:${isbn}`];
     if (!v) return null;
@@ -841,17 +974,22 @@ async function fetchOpenLibrary(isbn) {
   } catch (e) { return null; }
 }
 
-/* openBD(日本の書籍) → Google Books → Open Library(洋書) の順に検索し、
-   表紙・ページ数など足りない項目を後続のソースで補完する */
+/* 4つの検索先に同時に問い合わせ(待ち時間は一番遅いものだけで済む)、
+   openBD(出版社の情報) → 国会図書館 → Google Books → Open Library(洋書) の優先順で
+   項目ごとに組み合わせる。表紙・ページ数・定価など足りない項目は後ろの検索先で補う */
 async function fetchBookInfo(isbn) {
   // 雑誌(491コード)は号ごとの書誌データベースが存在しないため手入力登録にする
   if (isMagazineCode(isbn)) return null;
-  const fetchers = [fetchOpenBd, fetchGoogleBooks, fetchOpenLibrary];
+  const others = [fetchNdl(isbn).catch(() => null), fetchGoogleBooks(isbn), fetchOpenLibrary(isbn)];
+  const ob = await fetchOpenBd(isbn);
+  // openBDで書名と定価がそろっていれば、他の検索先は少し待つだけにする
+  // (そろっていなければ、国会図書館などの応答を打ち切りまで待つ)
+  const wait = ob && ob.title && ob.price ? 2500 : LOOKUP_TIMEOUT_MS * 2 + 1500;
+  const giveUp = new Promise(r => setTimeout(() => r(null), wait));
+  const results = [ob, ...await Promise.all(others.map(p => Promise.race([p, giveUp])))];
   const merged = { title: "", author: "", publisher: "", cover: "", totalPages: null, price: null };
   let found = false;
-  for (const f of fetchers) {
-    if (found && merged.title && merged.cover && merged.totalPages) break;
-    const r = await f(isbn);
+  for (const r of results) {
     if (!r) continue;
     found = true;
     merged.title = merged.title || r.title;
@@ -884,7 +1022,8 @@ async function lookupAndConfirm(isbn) {
   }
 
   const body = document.getElementById("confirmBody");
-  body.innerHTML = `<p style="padding:20px 0;color:var(--muted)">検索中… (ISBN: ${isbn})</p>`;
+  body.innerHTML = `<p style="padding:20px 0;color:var(--muted)">検索中… (ISBN: ${isbn})<br>
+    <small>出版社の情報・国立国会図書館などを探しています</small></p>`;
   fillLocationSelect(document.getElementById("confirmLocation"));
   pendingGenres = [];
   renderGenreChips(document.getElementById("confirmGenres"), pendingGenres, (next) => { pendingGenres = next; });
@@ -930,6 +1069,7 @@ async function lookupAndConfirm(isbn) {
         <p>ISBN: ${isbn}</p>
         ${info.totalPages ? `<p>${info.totalPages}ページ</p>` : ""}
         ${info.price ? `<p class="confirm-price">定価 ${priceText(info)}</p>` : ""}
+        ${priceSourceNote(info.price) ? `<p class="price-note">${priceSourceNote(info.price)}</p>` : ""}
       </div>
     `;
   }
@@ -971,6 +1111,8 @@ function addPendingBook() {
   saveState();
   hideModal("confirmModal");
   render();
+  // 定価が取れなかった本は、裏で国会図書館に問い合わせ直す(応答が遅れていた場合のため)
+  if (!price) setTimeout(backfillPrices, 500);
 }
 
 /* 登録確認画面の登録先(蔵書/検討中)切り替え */
@@ -1036,8 +1178,9 @@ function renderDetail() {
 
   // 定価。出版社の情報が無い本は、ボタンで取り直すか手入力できる
   const canFetchPrice = /^97[89]\d{10}$/.test(b.isbn);
+  const priceNote = priceSourceNote(b.price);
   const priceLineHtml = b.price && b.price.total
-    ? `<p class="detail-price">定価 ${priceText(b)}${b.price.source === "manual" ? "（手入力）" : ""}</p>`
+    ? `<p class="detail-price">定価 ${priceText(b)}</p>${priceNote ? `<p class="price-note">${priceNote}</p>` : ""}`
     : `<p class="detail-price none">定価 未登録${canFetchPrice ? ` <button class="price-fetch-btn" id="priceFetchBtn">↻ 取得</button>` : ""}</p>`;
 
   const commonTop = `
@@ -1636,7 +1779,7 @@ function escapeHtml(s) {
 
 /* ISBN10 → ISBN13 変換（手入力対応）。雑誌の491コードもそのまま受け付ける */
 function normalizeIsbn(input) {
-  const s = input.replace(/[-\s]/g, "");
+  const s = compactCode(input);
   if (/^97[89]\d{10}$/.test(s)) return s;
   if (/^491\d{10}$/.test(s)) return s;
   if (/^\d{9}[\dXx]$/.test(s)) {
@@ -1646,6 +1789,28 @@ function normalizeIsbn(input) {
     return core + ((10 - (sum % 10)) % 10);
   }
   return null;
+}
+
+/* 全角数字・ハイフン・空白を取り除いた番号 */
+function compactCode(input) {
+  return String(input).normalize("NFKC").replace(/[-\s]/g, "");
+}
+
+/* 入力された番号の最後の1桁(チェック数字)が合っているか。打ち間違いを見つけるために使う
+   (13桁は1・3を交互に掛ける方式、旧10桁のISBNは10〜1を掛けて11で割り切れるか) */
+function hasValidCheckDigit(input) {
+  const s = compactCode(input).toUpperCase();
+  if (/^\d{13}$/.test(s)) {
+    let sum = 0;
+    for (let i = 0; i < 12; i++) sum += Number(s[i]) * (i % 2 === 0 ? 1 : 3);
+    return (10 - (sum % 10)) % 10 === Number(s[12]);
+  }
+  if (/^\d{9}[\dX]$/.test(s)) {
+    let sum = 0;
+    for (let i = 0; i < 10; i++) sum += (s[i] === "X" ? 10 : Number(s[i])) * (10 - i);
+    return sum % 11 === 0;
+  }
+  return false;
 }
 
 /* ============================================================
@@ -1762,6 +1927,13 @@ async function submitManualIsbn() {
   const isbn = normalizeIsbn(input.value);
   if (!isbn) {
     alert("コードの形式が正しくありません。\n(本: 978から始まる13桁または10桁 / 雑誌: 491から始まる13桁)");
+    return;
+  }
+  if (!hasValidCheckDigit(input.value) && !confirm(
+    "この番号は、どこかの数字が違っている可能性があります。\n" +
+    "（最後の1桁は打ち間違いを見つけるための数字で、それが合いません）\n\n" +
+    "本の裏表紙の番号をもう一度確認してください。このまま検索しますか？")) {
+    input.focus();
     return;
   }
   const continuous = document.getElementById("contMode").checked;

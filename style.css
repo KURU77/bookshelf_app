@@ -635,6 +635,8 @@ body {
   margin-left: 4px;
 }
 .confirm-price { color: var(--green-dark) !important; font-weight: bold; }
+.price-note { font-size: .7rem !important; line-height: 1.5; color: var(--accent) !important; }
+.cart-old { font-size: .7rem; font-weight: normal; color: var(--accent); margin-left: 4px; }
 .book-price { font-size: .72rem; font-weight: bold; color: var(--green-dark); }
 
 /* ---------- カート画面 ---------- */
