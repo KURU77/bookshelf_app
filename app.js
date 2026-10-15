@@ -14,7 +14,6 @@ let currentLocation = "all";   // "all" または置き場所名
 let currentFilter = "all";     // all / unread / reading / done
 let currentGenre = "all";      // "all" / "none"(未分類) / ジャンル名
 let searchQuery = "";          // フリーワード検索(書名・著者)
-let cartOnly = false;          // 検討中リストで、カートに入れた本だけを表示する
 let pendingBook = null;        // 登録確認中の本
 let pendingList = "owned";     // 登録確認中の登録先リスト
 let pendingGenres = [];        // 登録確認中に選んだジャンル
@@ -118,7 +117,7 @@ function render() {
   renderListSwitch();
   renderTabs();
   renderGenreFilter();
-  renderCartBar();
+  renderCartFab();
   renderGrid();
   renderHeaderStats();
 }
@@ -135,41 +134,80 @@ function priceText(b) {
   return `${yen(b.price.total)}（税込）${base}`;
 }
 
-/* ---------- 検討中リストのカート ---------- */
-function renderCartBar() {
-  const bar = document.getElementById("cartBar");
-  if (currentList !== "wish") {
-    bar.hidden = true;
+/* ---------- カート(検討中の本の合計金額の目安) ---------- */
+function cartBooks() {
+  return state.books.filter(b => b.list === "wish" && b.inCart);
+}
+
+/* スキャンボタン左のカートボタン。入っている冊数を表示する */
+function renderCartFab() {
+  const count = cartBooks().length;
+  const badge = document.getElementById("cartFabCount");
+  badge.hidden = count === 0;
+  badge.textContent = count;
+  document.getElementById("cartFab").setAttribute("aria-label", `カートを開く（${count}冊）`);
+}
+
+function openCart() {
+  renderCartModal();
+  showModal("cartModal");
+}
+
+function renderCartModal() {
+  const body = document.getElementById("cartBody");
+  const items = cartBooks();
+  if (!items.length) {
+    body.innerHTML = `<p class="cart-empty">カートは空です。<br>検討中の本の詳細で「🛒 カートに入れる」を押すと、ここに入り、買うといくらになるかの目安が分かります。</p>`;
     return;
   }
-  bar.hidden = false;
-  const inCart = state.books.filter(b => b.list === "wish" && b.inCart);
-  if (!inCart.length) {
-    cartOnly = false;
-    bar.innerHTML = `<p class="cart-empty">🛒 本の詳細で「カートに入れる」を押すと、買うといくらになるかの目安がここに表示されます。</p>`;
-    return;
-  }
-  const priced = inCart.filter(b => b.price && b.price.total);
+  const priced = items.filter(b => b.price && b.price.total);
   const total = priced.reduce((sum, b) => sum + b.price.total, 0);
-  const unknown = inCart.length - priced.length;
-  bar.innerHTML = `
+  const unknown = items.length - priced.length;
+  body.innerHTML = `
     <div class="cart-summary">
-      <span class="cart-title">🛒 カート ${inCart.length}冊</span>
+      <span class="cart-title">${items.length}冊</span>
       <span class="cart-total">合計 ${yen(total)}</span>
     </div>
     <p class="cart-note">定価（税込）の合計です。送料やポイントは含みません。${unknown ? `価格が分からない${unknown}冊は合計に入っていません。` : ""}</p>
-    <div class="cart-actions">
-      <button class="cart-filter-btn" id="cartFilterBtn">${cartOnly ? "検討中の本をすべて表示" : "カートの本だけ表示"}</button>
-      <button class="cart-clear-btn" id="cartClearBtn">カートを空にする</button>
-    </div>
+    <ul class="cart-list">
+      ${items.map(b => `
+        <li class="cart-item" data-isbn="${b.isbn}">
+          ${b.cover
+            ? `<img class="cart-thumb" src="${escapeHtml(b.cover)}" alt="">`
+            : `<div class="cart-thumb placeholder"></div>`}
+          <div class="cart-info">
+            <div class="cart-item-title">${escapeHtml(b.title)}</div>
+            <div class="cart-item-price">${b.price && b.price.total ? yen(b.price.total) : "価格不明"}</div>
+          </div>
+          <button class="cart-remove" data-remove="${b.isbn}">外す</button>
+        </li>`).join("")}
+    </ul>
+    <button class="btn danger cart-clear-btn" id="cartClearBtn">カートを空にする</button>
   `;
-  document.getElementById("cartFilterBtn").onclick = () => { cartOnly = !cartOnly; render(); };
+
+  // 本を押すと詳細(ネットショップへのリンクがある画面)を開く
+  body.querySelectorAll(".cart-item").forEach(li => {
+    li.onclick = (e) => {
+      if (e.target.closest(".cart-remove")) return;
+      hideModal("cartModal");
+      openDetail(li.dataset.isbn);
+    };
+  });
+  body.querySelectorAll(".cart-remove").forEach(btn => {
+    btn.onclick = () => {
+      const b = state.books.find(x => x.isbn === btn.dataset.remove);
+      if (b) delete b.inCart;
+      saveState();
+      render();
+      renderCartModal();
+    };
+  });
   document.getElementById("cartClearBtn").onclick = () => {
-    if (!confirm(`カートの${inCart.length}冊をすべてカートから外しますか？\n（本は検討中リストに残ります）`)) return;
-    inCart.forEach(b => { delete b.inCart; });
-    cartOnly = false;
+    if (!confirm(`カートの${items.length}冊をすべてカートから外しますか？\n（本は検討中リストに残ります）`)) return;
+    items.forEach(b => { delete b.inCart; });
     saveState();
     render();
+    renderCartModal();
   };
 }
 
@@ -234,7 +272,6 @@ function visibleBooks() {
       if (currentLocation !== "all" && b.location !== currentLocation) return false;
       if (currentFilter !== "all" && bookStatus(b) !== currentFilter) return false;
     }
-    if (currentList === "wish" && cartOnly && !b.inCart) return false;
     if (currentGenre === "none") { if (b.genres.length) return false; }
     else if (currentGenre !== "all" && !b.genres.includes(currentGenre)) return false;
     if (q && !`${b.title} ${b.author} ${b.memo || ""}`.toLowerCase().includes(q)) return false;
@@ -426,7 +463,7 @@ function commitGridOrder() {
 /* ============================================================
    バーコードスキャン
    ============================================================ */
-const APP_VERSION = "3.1";
+const APP_VERSION = "3.2";
 let mediaStream = null;
 let scanLoopId = null;   // requestAnimationFrame用(ネイティブ検出)
 let scanTimerId = null;  // setTimeout用(ZXing検出)
@@ -1615,6 +1652,7 @@ function normalizeIsbn(input) {
    イベント登録・初期化
    ============================================================ */
 document.getElementById("scanFab").onclick = openScanner;
+document.getElementById("cartFab").onclick = openCart;
 document.getElementById("confirmAddBtn").onclick = addPendingBook;
 document.getElementById("manageLocBtn").onclick = () => { renderLocList(); renderGenreList(); showModal("locModal"); };
 
@@ -1795,6 +1833,7 @@ window.bookshelf = {
 
 function refreshAfterSync() {
   render();
+  if (!document.getElementById("cartModal").hidden) renderCartModal();
   const modal = document.getElementById("detailModal");
   if (modal.hidden) return;
   // ページ数などを入力している最中は、書きかけが消えないよう詳細画面を描き直さない

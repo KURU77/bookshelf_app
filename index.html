@@ -54,9 +54,6 @@
   <select id="genreFilter" title="ジャンルで絞り込み"></select>
 </div>
 
-<!-- 検討中リストのカート(合計金額の目安) -->
-<div class="cart-bar" id="cartBar" hidden></div>
-
 <!-- 本の一覧（表紙グリッド） -->
 <main class="book-grid" id="bookGrid"></main>
 <div class="empty-state" id="emptyState" hidden>
@@ -64,8 +61,11 @@
   <p>「＋ スキャン」でバーコードを読み取って登録しましょう。</p>
 </div>
 
-<!-- スキャンボタン -->
-<button class="fab" id="scanFab">＋ スキャン</button>
+<!-- 画面右下: カート(検討中の本の合計金額の目安)とスキャンボタン -->
+<div class="fab-row">
+  <button class="cart-fab" id="cartFab" aria-label="カートを開く">🛒<span class="cart-fab-count" id="cartFabCount" hidden></span></button>
+  <button class="fab" id="scanFab">＋ スキャン</button>
+</div>
 
 <!-- ===== スキャナーモーダル ===== -->
 <div class="modal" id="scanModal" hidden>
@@ -130,6 +130,17 @@
       <button class="close-btn" data-close="detailModal">✕</button>
     </div>
     <div id="detailBody"></div>
+  </div>
+</div>
+
+<!-- ===== カートモーダル ===== -->
+<div class="modal" id="cartModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>🛒 カート</h2>
+      <button class="close-btn" data-close="cartModal">✕</button>
+    </div>
+    <div id="cartBody"></div>
   </div>
 </div>
 

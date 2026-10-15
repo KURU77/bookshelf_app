@@ -227,11 +227,44 @@ body {
   line-height: 2;
 }
 
-/* ---------- FAB ---------- */
-.fab {
+/* ---------- FAB(右下のカートとスキャン) ---------- */
+.fab-row {
   position: fixed;
   right: calc(20px + var(--safe-right));
   bottom: calc(24px + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 30;
+}
+.cart-fab {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: #fff;
+  font-size: 1.45rem;
+  line-height: 1;
+  box-shadow: 0 4px 16px rgba(0,0,0,.2);
+  cursor: pointer;
+}
+.cart-fab:active { transform: scale(.94); }
+.cart-fab-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: .75rem;
+  font-weight: bold;
+  line-height: 22px;
+}
+.fab {
   background: var(--accent);
   color: #fff;
   border: none;
@@ -241,7 +274,6 @@ body {
   font-weight: bold;
   box-shadow: 0 4px 16px rgba(0,0,0,.25);
   cursor: pointer;
-  z-index: 30;
 }
 .fab:active { transform: scale(.96); }
 
@@ -605,38 +637,43 @@ body {
 .confirm-price { color: var(--green-dark) !important; font-weight: bold; }
 .book-price { font-size: .72rem; font-weight: bold; color: var(--green-dark); }
 
-/* ---------- 検討中リストのカート ---------- */
-.cart-bar {
-  margin: 0 16px 4px;
-  padding: 12px 14px;
-  background: #fff;
-  border: 1.5px solid var(--accent);
-  border-radius: var(--radius);
-}
-.cart-bar[hidden] { display: none; }
+/* ---------- カート画面 ---------- */
 .cart-summary { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .cart-title { font-weight: bold; color: var(--green-dark); }
-.cart-total { font-size: 1.15rem; font-weight: bold; color: var(--accent); }
-.cart-note, .cart-empty { font-size: .74rem; color: var(--muted); line-height: 1.6; margin-top: 4px; }
-.cart-empty { margin-top: 0; }
-.cart-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
-.cart-clear-btn {
-  border: none;
-  background: none;
-  color: var(--danger);
-  font-size: .78rem;
-  padding: 6px 4px;
+.cart-total { font-size: 1.3rem; font-weight: bold; color: var(--accent); }
+.cart-note { font-size: .74rem; color: var(--muted); line-height: 1.6; margin-top: 4px; }
+.cart-empty { font-size: .85rem; color: var(--muted); line-height: 1.8; padding: 12px 0 8px; }
+.cart-list { list-style: none; margin: 12px 0 16px; }
+.cart-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #ece6d8;
   cursor: pointer;
 }
-.cart-filter-btn {
-  border: none;
-  background: #f6e7d8;
-  color: #8a4b12;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: .78rem;
-  cursor: pointer;
+.cart-thumb {
+  width: 40px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #ddd6c8;
+  flex-shrink: 0;
 }
+.cart-info { flex: 1; min-width: 0; }
+.cart-item-title { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cart-item-price { font-size: .82rem; font-weight: bold; color: var(--green-dark); margin-top: 2px; }
+.cart-remove {
+  border: 1px solid #d8d2c2;
+  background: #fff;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: .75rem;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.cart-clear-btn { width: 100%; }
 .status-badge.cart { background: var(--accent); }
 .cart-toggle { width: 100%; margin-bottom: 4px; }
 
